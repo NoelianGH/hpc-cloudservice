@@ -9,6 +9,9 @@ services:
       COORDINATOR_URL: ${COORDINATOR_URL}
       WORKER_TOKEN: ${WORKER_TOKEN}
       WORKER_NAME: ${WORKER_NAME}
+      # WORKER_ID diisi otomatis oleh worker_auth_cli.py setelah autentikasi berhasil.
+      # Jika kosong, worker akan membuat entri baru (mode token global / backward-compat).
+      WORKER_ID: ${WORKER_ID:-}
       CHEAT: ${CHEAT:-0}
     extra_hosts:
       - "host.docker.internal:host-gateway"

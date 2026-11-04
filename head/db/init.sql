@@ -1,8 +1,26 @@
 CREATE TABLE workers (
-  id        TEXT PRIMARY KEY,
-  name      TEXT NOT NULL,
-  last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
-  credits   INT NOT NULL DEFAULT 0
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  github_username TEXT,
+  email           TEXT,
+  auth_token      TEXT UNIQUE,
+  status          TEXT NOT NULL DEFAULT 'active', -- active | pending | suspended
+  last_seen       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  credits         INT NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE worker_auth_sessions (
+  session_id      TEXT PRIMARY KEY,
+  worker_name     TEXT NOT NULL,
+  github_username TEXT NOT NULL,
+  email           TEXT NOT NULL,
+  otp             TEXT NOT NULL,
+  otp_expires_at  TIMESTAMPTZ NOT NULL,
+  verified        BOOLEAN NOT NULL DEFAULT FALSE,
+  attempts        INT NOT NULL DEFAULT 0,
+  github_metrics  JSONB,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE jobs (
@@ -32,6 +50,9 @@ CREATE TABLE assignments (
   finished_at TIMESTAMPTZ
 );
 
+CREATE INDEX ON workers (auth_token);
+CREATE INDEX ON worker_auth_sessions (email);
+CREATE INDEX ON worker_auth_sessions (github_username);
 CREATE INDEX ON tasks (status);
 CREATE INDEX ON assignments (task_id);
 CREATE INDEX ON assignments (status, lease_until);
