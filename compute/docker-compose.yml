@@ -1,0 +1,22 @@
+# Worker relawan di dalam sandbox: non-root, read-only, tanpa capability,
+# tanpa akses folder host / docker.sock, dibatasi CPU, RAM, dan jumlah proses.
+services:
+  worker:
+    build: .
+    image: hpc-worker
+    restart: unless-stopped
+    environment:
+      COORDINATOR_URL: ${COORDINATOR_URL}
+      WORKER_TOKEN: ${WORKER_TOKEN}
+      WORKER_NAME: ${WORKER_NAME}
+      CHEAT: ${CHEAT:-0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1
