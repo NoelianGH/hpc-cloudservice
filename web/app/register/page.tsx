@@ -27,7 +27,6 @@ export default function RegisterPage() {
 
   // Analysis result & Session details
   const [sessionId, setSessionId] = useState<string>("");
-  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
   const [githubScore, setGithubScore] = useState<number | null>(null);
   const [githubFactors, setGithubFactors] = useState<GitHubFactors | null>(null);
 
@@ -105,10 +104,6 @@ export default function RegisterPage() {
       setGithubScore(data.github_score ?? 100);
       setGithubFactors(data.factors ?? null);
 
-      if (data.dev_mode && data.dev_otp) {
-        setDevOtpHint(data.dev_otp);
-      }
-
       // Proceed to Step 2 (OTP)
       setStep(2);
     } catch (err: any) {
@@ -183,10 +178,7 @@ export default function RegisterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId }),
       });
-      const data = await res.json();
-      if (data.dev_otp) {
-        setDevOtpHint(data.dev_otp);
-      }
+      await res.json();
       setResendMsg("Kode OTP baru telah dikirimkan ke email Anda.");
     } catch (err: any) {
       setResendMsg("Gagal mengirim ulang OTP: " + err.message);
@@ -453,19 +445,6 @@ export default function RegisterPage() {
                 </div>
               )}
             </div>
-
-            {/* Dev Mode OTP Hint (when SMTP is not configured) */}
-            {devOtpHint && (
-              <div className="mb-6 rounded border border-amber-500/50 bg-cyber-amber-darkest/40 p-4 font-mono text-xs text-amber-200">
-                <span className="font-bold text-cyber-amber-bright">[DEV SIMULATION HINT]:</span>
-                <p className="mt-1">
-                  Coordinator running in local simulation mode. Your OTP verification code is:
-                </p>
-                <div className="mt-2 text-center font-mono text-2xl font-bold tracking-[0.4em] text-cyber-amber-bright bg-cyber-black py-2 rounded border border-cyber-amber/40">
-                  {devOtpHint}
-                </div>
-              </div>
-            )}
 
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div>

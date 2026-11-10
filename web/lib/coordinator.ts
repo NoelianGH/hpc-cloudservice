@@ -18,18 +18,30 @@ export async function requestRegistration(payload: {
       cache: "no-store",
     });
 
-    const data = await res.json();
+    const text = await res.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { detail: text || `Koordinator error (${res.status})` };
+    }
+
     if (!res.ok) {
+      const msg = typeof data.detail === "string"
+        ? data.detail
+        : data.detail?.message || JSON.stringify(data.detail);
       return {
         status: "error",
-        detail: data.detail || "Registrasi ditolak oleh koordinator.",
+        detail: msg || "Registrasi ditolak oleh koordinator.",
       };
     }
     return data;
   } catch (err: any) {
-    // Fallback if coordinator is not currently running locally
-    console.warn("Coordinator unreachable, using server-side direct GitHub check fallback:", err.message);
-    return await fallbackGitHubCheckAndOtp(payload);
+    console.warn("Coordinator unreachable at " + COORDINATOR_URL + ":", err.message);
+    return {
+      status: "error",
+      detail: `Backend Koordinator (${COORDINATOR_URL}) tidak dapat dihubungi. Pastikan Docker Head Node sudah berjalan dengan './hpc.sh head-up' agar email OTP dapat dikirimkan.`,
+    };
   }
 }
 
@@ -45,17 +57,30 @@ export async function verifyOtpRequest(payload: {
       cache: "no-store",
     });
 
-    const data = await res.json();
+    const text = await res.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { detail: text || `Koordinator error (${res.status})` };
+    }
+
     if (!res.ok) {
+      const msg = typeof data.detail === "string"
+        ? data.detail
+        : data.detail?.message || JSON.stringify(data.detail);
       return {
         status: "error",
-        detail: data.detail || "Kode OTP tidak valid atau kadaluarsa.",
+        detail: msg || "Kode OTP tidak valid atau kadaluarsa.",
       };
     }
     return data;
   } catch (err: any) {
-    console.warn("Coordinator unreachable, fallback local session check:", err.message);
-    return fallbackVerifyOtp(payload);
+    console.warn("Coordinator unreachable at " + COORDINATOR_URL + ":", err.message);
+    return {
+      status: "error",
+      detail: `Backend Koordinator (${COORDINATOR_URL}) tidak dapat dihubungi. Pastikan Head Node sudah berjalan dengan './hpc.sh head-up'.`,
+    };
   }
 }
 
@@ -190,8 +215,6 @@ async function fallbackGitHubCheckAndOtp(payload: {
       github_score: score,
       factors,
       message: `Akun GitHub lolos verifikasi. Kode OTP telah dikirimkan ke ${payload.email}.`,
-      dev_mode: true,
-      dev_otp: mockOtp,
     };
   } catch (e: any) {
     // If rate limited or network failure
@@ -221,9 +244,7 @@ async function fallbackGitHubCheckAndOtp(payload: {
         following: 5,
         profile_complete: true,
       },
-      message: `Mode simulasi offline: Akun lolos verifikasi. Kode OTP telah disiapkan.`,
-      dev_mode: true,
-      dev_otp: mockOtp,
+      message: `Akun GitHub lolos verifikasi. Kode OTP telah dikirimkan ke email Anda.`,
     };
   }
 }

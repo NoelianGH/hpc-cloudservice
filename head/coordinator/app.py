@@ -143,20 +143,30 @@ def auth_register_request(body: AuthRegisterRequest):
     session_id = uuid.uuid4().hex
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
 
-    with db() as c:
-        c.execute("""
-            INSERT INTO worker_auth_sessions 
-                (session_id, worker_name, github_username, email, otp, otp_expires_at, github_metrics)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            session_id,
-            worker_name,
-            github_user,
-            email,
-            otp,
-            expires_at,
-            Jsonb(gh_check["factors"])
-        ))
+    for attempt in range(2):
+        try:
+            with db() as c:
+                c.execute("""
+                    INSERT INTO worker_auth_sessions 
+                        (session_id, worker_name, github_username, email, otp, otp_expires_at, github_metrics)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    session_id,
+                    worker_name,
+                    github_user,
+                    email,
+                    otp,
+                    expires_at,
+                    Jsonb(gh_check["factors"])
+                ))
+            break
+        except Exception as e:
+            if attempt == 0:
+                print(f"[DB AUTO-MIGRATE] Tabel belum siap, menjalankan migrasi skema: {e}", flush=True)
+                init_db_schema()
+            else:
+                print(f"[DB ERROR] Gagal menyimpan sesi: {e}", flush=True)
+                raise HTTPException(500, f"Gagal menyimpan sesi verifikasi ke database: {str(e)}")
 
     # 3. Pengiriman Email OTP
     mail_result = send_otp_email(
