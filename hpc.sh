@@ -55,6 +55,11 @@ case "$1" in
                     echo "WORKER_TOKEN : (belum diisi - jalankan: ./hpc.sh worker-login)"
                 fi ;;
 
+  # ---- Web Portal (Next.js) ----
+  web-dev)
+                echo "Menjalankan Web Portal Next.js di http://localhost:3000 ..."
+                cd web && npm run dev ;;
+
   *) cat << 'USAGE'
 Pemakaian: ./hpc.sh <perintah>
 
@@ -75,6 +80,9 @@ Compute node (alur pertama kali):
   worker-cheat         jalankan 1 worker curang (uji validator)
   worker-logs          lihat log worker
   worker-down          matikan semua worker
+
+Web Portal:
+  web-dev              jalankan portal web Next.js (port :3000)
 USAGE
   ;;
 esac
