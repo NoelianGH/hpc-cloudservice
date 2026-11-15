@@ -27,6 +27,11 @@ Portal antarmuka web futuristik untuk platform **HPC Cloud Service** (Distribute
    - Monitoring antrean tugas (Monte Carlo Pi, Mandelbrot, dsb) beserta status konsensus.
    - Terminal runner snippet untuk menjalankan worker kontainer via Docker.
 
+4. **Dashboard Admin (`/admin`)**:
+   - Login khusus admin dengan email + password (`./hpc.sh admin-setup`), sesi di cookie httpOnly.
+   - Data asli koordinator: worker, job, tugas & validasi replika, pendaftaran relawan.
+   - Aksi admin: buat job, tangguhkan/aktifkan worker, cabut token worker.
+
 ---
 
 ## Cara Menjalankan Website
@@ -68,7 +73,11 @@ web/
 │   │   │   ├── register-request/route.ts  # Endpoint cek GitHub & kirim OTP
 │   │   │   ├── verify-otp/route.ts        # Endpoint verifikasi kode OTP
 │   │   │   └── resend-otp/route.ts        # Endpoint kirim ulang OTP
+│   │   ├── admin/                         # Login/logout admin + proxy ke /api/admin/* koordinator
 │   │   └── stats/route.ts                 # Telemetry cluster koordinator
+│   ├── admin/
+│   │   ├── login/page.tsx                 # Halaman login admin (email + password)
+│   │   └── page.tsx                       # Dashboard admin
 │   ├── dashboard/
 │   │   └── page.tsx                       # Halaman Command Center Dashboard
 │   ├── login/

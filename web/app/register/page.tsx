@@ -151,14 +151,13 @@ export default function RegisterPage() {
         worker_token: data.worker_token,
       });
 
-      // Also persist to localStorage for convenient dashboard viewing
-      if (typeof window !== "undefined") {
-        localStorage.setItem("hpc_worker_token", data.worker_token);
-        localStorage.setItem("hpc_worker_id", data.worker_id);
-        localStorage.setItem("hpc_worker_name", data.worker_name);
-        localStorage.setItem("hpc_github_username", data.github_username);
-        localStorage.setItem("hpc_email", formData.email);
-      }
+      // Langsung login ke dashboard relawan: token disimpan di cookie httpOnly oleh server
+      // (bukan localStorage), lalu divalidasi koordinator di setiap request.
+      await fetch("/api/volunteer/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: data.worker_token }),
+      }).catch(() => undefined);
 
       setStep(3);
     } catch (err: any) {
@@ -566,7 +565,7 @@ export default function RegisterPage() {
 
               <TerminalCode
                 title="RUN YOUR WORKER // BASH"
-                code={`# 1. Masuk ke folder proyek dan tarik pembaruan\ncd ~/cloud-hpc && git pull\n\n# 2. Masukkan token Anda ke file .env\necho "WORKER_TOKEN=${verifiedWorker.worker_token}" >> .env\necho "WORKER_NAME=${verifiedWorker.worker_name}" >> .env\n\n# 3. Jalankan worker sandbox dalam Docker\n./hpc.sh worker-up 1\n\n# 4. Pantau komputasi Anda\n./hpc.sh worker-logs`}
+                code={`# 1. Masuk ke folder proyek dan tarik pembaruan\ncd ~/cloud-hpc && git pull\n\n# 2. Masukkan token Anda ke file .env\necho "WORKER_TOKEN=${verifiedWorker.worker_token}" >> .env\necho "WORKER_ID=${verifiedWorker.worker_id}" >> .env\necho "WORKER_NAME=${verifiedWorker.worker_name}" >> .env\n\n# 3. Jalankan worker sandbox dalam Docker\n./hpc.sh worker-up 1\n\n# 4. Pantau komputasi Anda\n./hpc.sh worker-logs`}
               />
             </div>
 

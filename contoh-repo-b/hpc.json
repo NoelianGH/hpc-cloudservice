@@ -1,0 +1,7 @@
+{
+  "build": "python3 -m compileall -q app",
+  "test": {
+    "files": "tests/test_*.py",
+    "command": "python3 -m unittest -v {file}"
+  }
+}

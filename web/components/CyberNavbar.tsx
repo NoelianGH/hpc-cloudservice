@@ -13,16 +13,19 @@ export default function CyberNavbar() {
       .then((res) => res.json())
       .then((data) => {
         setClusterOnline(data.online ?? true);
-        setActiveNodes(data.workers?.length || 0);
+        setActiveNodes((data.workers || []).filter((w: any) => w.online).length);
       })
       .catch(() => setClusterOnline(false));
   }, []);
 
   const navLinks = [
     { href: "/", label: "OVERVIEW" },
-    { href: "/register", label: "NODE REGISTRATION" },
-    { href: "/login", label: "SIGN IN" },
-    { href: "/dashboard", label: "COMMAND CENTER" },
+    { href: "/join", label: "GABUNG" },
+    { href: "/register", label: "REGISTER" },
+    { href: "/leaderboard", label: "LEADERBOARD" },
+    { href: "/login", label: "LOGIN" },
+    { href: "/dashboard", label: "DASHBOARD" },
+    { href: "/admin", label: "ADMIN" },
   ];
 
   return (
@@ -50,7 +53,7 @@ export default function CyberNavbar() {
         {/* Navigation Links */}
         <nav className="hidden md:flex items-center space-x-1 lg:space-x-2">
           {navLinks.map((link) => {
-            const isActive = pathname === link.href;
+            const isActive = pathname === link.href || (link.href === "/admin" && pathname.startsWith("/admin"));
             return (
               <Link
                 key={link.href}

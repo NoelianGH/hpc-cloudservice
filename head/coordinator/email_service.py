@@ -28,33 +28,15 @@ def generate_otp(length: int = 6) -> str:
     return "".join(secrets.choice("0123456789") for _ in range(length))
 
 
-def send_otp_email(to_email: str, otp: str, worker_name: str, github_username: str) -> dict:
+def _deliver(to_email: str, subject: str, body_text: str, extra: dict | None = None,
+             label: str = "") -> tuple[str, str | None]:
     """
-    Mengirimkan email berisi token OTP verifikasi ke worker.
-    Mendukung 3 metode:
+    Kirim satu email lewat metode yang dikonfigurasi, berurutan:
     1. Google Apps Script Webhook (Port 443 HTTPS - Anti blokir ISP)
     2. Resend API (Port 443 HTTPS)
     3. Direct SMTP (Port 465 SSL & Port 587 STARTTLS)
+    Mengembalikan ("sent" | "dev" | "failed", error). "dev" = tidak ada metode yang diisi.
     """
-    subject = f"[HPC Cloud] Kode Verifikasi Worker Anda: {otp}"
-
-    body_text = f"""Halo {github_username},
-
-Worker Anda '{worker_name}' sedang mencoba melakukan registrasi di kluster HPC Cloud Service.
-
-KODE VERIFIKASI (OTP) ANDA:
-===========================
-      {otp}
-===========================
-
-Kode ini berlaku selama 10 menit. Masukkan kode ini ke prompt verifikasi untuk mengaktifkan worker Anda.
-
-Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini.
-
-Salam,
-Tim HPC Cloud Service
-"""
-
     # =========================================================================
     # METODE 1: Google Apps Script Webhook HTTPS (Port 443)
     # =========================================================================
@@ -65,7 +47,7 @@ Tim HPC Cloud Service
                 "to": to_email,
                 "subject": subject,
                 "body": body_text,
-                "otp": otp,
+                **(extra or {}),
             }).encode("utf-8")
 
             req = urllib.request.Request(
@@ -79,11 +61,7 @@ Tim HPC Cloud Service
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 print(f"[EMAIL SUCCESS] Berhasil mengirimkan email OTP via HTTPS Webhook ke {to_email}!", flush=True)
-                return {
-                    "success": True,
-                    "dev_mode": False,
-                    "message": f"Email kode verifikasi telah dikirimkan ke {to_email}",
-                }
+                return "sent", None
         except Exception as e:
             print(f"[EMAIL WARN] Gagal via Webhook: {e}", flush=True)
 
@@ -111,11 +89,7 @@ Tim HPC Cloud Service
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 print(f"[EMAIL SUCCESS] Berhasil mengirimkan email OTP via Resend API ke {to_email}!", flush=True)
-                return {
-                    "success": True,
-                    "dev_mode": False,
-                    "message": f"Email kode verifikasi telah dikirimkan ke {to_email}",
-                }
+                return "sent", None
         except Exception as e:
             print(f"[EMAIL WARN] Gagal via Resend API: {e}", flush=True)
 
@@ -123,17 +97,7 @@ Tim HPC Cloud Service
     # METODE 3: Direct SMTP
     # =========================================================================
     if not SMTP_HOST:
-        print(f"\n" + "=" * 60, flush=True)
-        print(f"[SIMULASI EMAIL / DEV MODE] Pengiriman OTP ke {to_email}", flush=True)
-        print(f"Worker      : {worker_name} (GitHub: @{github_username})", flush=True)
-        print(f"Kode OTP    : {otp}", flush=True)
-        print("=" * 60 + "\n", flush=True)
-        return {
-            "success": True,
-            "dev_mode": True,
-            "message": "OTP disimulasikan (cek log head node coordinator).",
-            "dev_otp": otp,
-        }
+        return "dev", None
 
     clean_user = SMTP_USER.strip().strip('"').strip("'")
     clean_from = (SMTP_FROM or clean_user).strip().strip('"').strip("'")
@@ -174,18 +138,64 @@ Tim HPC Cloud Service
                             server.login(clean_user, clean_password)
                         server.send_message(msg)
 
-                print(f"[EMAIL SUCCESS] Berhasil mengirimkan email OTP ke {to_email} via port {port}!", flush=True)
-                return {
-                    "success": True,
-                    "dev_mode": False,
-                    "message": f"Email kode verifikasi telah dikirimkan ke {to_email}",
-                }
+                print(f"[EMAIL SUCCESS] Berhasil mengirimkan email {label} ke {to_email} via port {port}!", flush=True)
+                return "sent", None
             except Exception as e:
                 last_error = e
                 print(f"[EMAIL WARN] Gagal via {SMTP_HOST}:{port} ({mode}): {e}", flush=True)
     finally:
         socket.getaddrinfo = orig_getaddrinfo
+    return "failed", str(last_error)
 
+
+
+def send_otp_email(to_email: str, otp: str, worker_name: str, github_username: str) -> dict:
+    """
+    Mengirimkan email berisi token OTP verifikasi ke worker.
+    Mendukung 3 metode:
+    1. Google Apps Script Webhook (Port 443 HTTPS - Anti blokir ISP)
+    2. Resend API (Port 443 HTTPS)
+    3. Direct SMTP (Port 465 SSL & Port 587 STARTTLS)
+    """
+    subject = f"[HPC Cloud] Kode Verifikasi Worker Anda: {otp}"
+
+    body_text = f"""Halo {github_username},
+
+Worker Anda '{worker_name}' sedang mencoba melakukan registrasi di kluster HPC Cloud Service.
+
+KODE VERIFIKASI (OTP) ANDA:
+===========================
+      {otp}
+===========================
+
+Kode ini berlaku selama 10 menit. Masukkan kode ini ke prompt verifikasi untuk mengaktifkan worker Anda.
+
+Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini.
+
+Salam,
+Tim HPC Cloud Service
+"""
+
+    status, err = _deliver(to_email, subject, body_text, {"otp": otp}, "OTP")
+    if status == "sent":
+        return {
+            "success": True,
+            "dev_mode": False,
+            "message": f"Email kode verifikasi telah dikirimkan ke {to_email}",
+        }
+    if status == "dev":
+        print(f"\n" + "=" * 60, flush=True)
+        print(f"[SIMULASI EMAIL / DEV MODE] Pengiriman OTP ke {to_email}", flush=True)
+        print(f"Worker      : {worker_name} (GitHub: @{github_username})", flush=True)
+        print(f"Kode OTP    : {otp}", flush=True)
+        print("=" * 60 + "\n", flush=True)
+        return {
+            "success": True,
+            "dev_mode": True,
+            "message": "OTP disimulasikan (cek log head node coordinator).",
+            "dev_otp": otp,
+        }
+    last_error = err
     print(f"[EMAIL ERROR] Semua metode SMTP gagal. Error terakhir: {last_error}", flush=True)
     print(f"[FALLBACK LOG] KODE OTP UNTUK {to_email} ADALAH: {otp}", flush=True)
     return {
@@ -194,3 +204,11 @@ Tim HPC Cloud Service
         "warning": f"Pengiriman email gagal ({str(last_error)}). Kode OTP dicatat ke log server.",
         "dev_otp": otp,
     }
+
+
+def send_email(to_email: str, subject: str, body_text: str) -> dict:
+    """Email umum (mis. peringatan untuk admin). Tanpa metode pengiriman: dicatat di log saja."""
+    status, err = _deliver(to_email, subject, body_text, None, "peringatan")
+    if status == "dev":
+        print(f"[SIMULASI EMAIL / DEV MODE] Ke {to_email}: {subject}\n{body_text}", flush=True)
+    return {"status": status, "error": err}

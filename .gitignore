@@ -1,2 +1,6 @@
 .env
 __pycache__/
+backup/*
+!backup/.gitkeep
+watch/*
+!watch/.gitkeep

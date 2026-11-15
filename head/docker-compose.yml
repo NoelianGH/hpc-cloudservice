@@ -21,6 +21,9 @@ services:
       DATABASE_URL: postgresql://hpc:${POSTGRES_PASSWORD}@db:5432/hpc
       WORKER_TOKEN: ${WORKER_TOKEN}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      ADMIN_SESSION_HOURS: ${ADMIN_SESSION_HOURS:-8}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_MIN_ACCOUNT_AGE_DAYS: ${GITHUB_MIN_ACCOUNT_AGE_DAYS:-30}
       GITHUB_MIN_PUBLIC_REPOS: ${GITHUB_MIN_PUBLIC_REPOS:-2}
@@ -32,6 +35,37 @@ services:
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       EMAIL_WEBHOOK_URL: ${EMAIL_WEBHOOK_URL:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Repo job (kode tugas) terpisah dari repo HPC, dipatok ke commit SHA
+      JOB_REPO_URL: ${JOB_REPO_URL:-}
+      JOB_REPO_ENTRY: ${JOB_REPO_ENTRY:-python3 run.py}
+      JOB_REPO_ALLOWLIST: ${JOB_REPO_ALLOWLIST:-https://github.com/}
+      # Hasil job di-commit HANYA oleh head node ke branch per job
+      RESULTS_REPO_URL: ${RESULTS_REPO_URL:-}
+      RESULTS_GIT_TOKEN: ${RESULTS_GIT_TOKEN:-}
+      RESULTS_BRANCH_PREFIX: ${RESULTS_BRANCH_PREFIX:-results/job-}
+      # Insentif relawan
+      CERT_MIN_CREDITS: ${CERT_MIN_CREDITS:-50}
+      CERT_MAX_REJECT_PCT: ${CERT_MAX_REJECT_PCT:-10}
+      VALIDATOR_TICK_SECONDS: ${VALIDATOR_TICK_SECONDS:-1}
+      # Proyek perangkat lunak (repo B) yang dikerjakan relawan + CI terdistribusi
+      PROJECT_REPO_URL: ${PROJECT_REPO_URL:-}
+      PROJECT_APP_NAME: ${PROJECT_APP_NAME:-}
+      PROJECT_DEFAULT_BRANCH: ${PROJECT_DEFAULT_BRANCH:-main}
+      PROJECT_BRANCH_PREFIX: ${PROJECT_BRANCH_PREFIX:-task/}
+      PROJECT_GIT_TOKEN: ${PROJECT_GIT_TOKEN:-}
+      PROJECT_WEBHOOK_SECRET: ${PROJECT_WEBHOOK_SECRET:-}
+      PROJECT_POLL_SECONDS: ${PROJECT_POLL_SECONDS:-90}
+      JOBDESK_MAX_ACTIVE: ${JOBDESK_MAX_ACTIVE:-1}
+      REQUIRE_CI_PASS: ${REQUIRE_CI_PASS:-1}
+      CI_REPLICAS: ${CI_REPLICAS:-2}
+      CI_TIMEOUT_S: ${CI_TIMEOUT_S:-300}
+      CI_MEMORY_MB: ${CI_MEMORY_MB:-512}
+      # Watch + peringatan admin (tab PERINGATAN, email ke ALERT_EMAIL_TO / ADMIN_EMAIL)
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_EMAIL_MIN_LEVEL: ${ALERT_EMAIL_MIN_LEVEL:-warning}
+      ALERT_EMAIL_COOLDOWN_MIN: ${ALERT_EMAIL_COOLDOWN_MIN:-15}
+      WATCH_MISMATCH_LIMIT: ${WATCH_MISMATCH_LIMIT:-3}
+      BACKUP_MAX_AGE_MIN: ${BACKUP_MAX_AGE_MIN:-130}
     ports:
       - "8000:8000"
     depends_on:
@@ -43,6 +77,29 @@ services:
     restart: unless-stopped
     command: ["python", "validator.py"]
     environment: *env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Backup database otomatis tiap jam ke folder backup/ (lihat backup/backup.sh)
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: hpc
+      PGDATABASE: hpc
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${BACKUP_TZ:-WIB-7}
+      BACKUP_KEEP_HOURLY: ${BACKUP_KEEP_HOURLY:-24}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_COPY_DIR: ${BACKUP_COPY_DIR:-}
+    volumes:
+      - ./backup/backup.sh:/backup.sh:ro
+      - ../backup:/backup
+      # Salinan di luar laptop (mis. folder Google Drive/OneDrive). Kosong = tidak disalin.
+      - ${BACKUP_COPY_DIR:-../backup/.tanpa-salinan}:/backup-copy
     depends_on:
       db:
         condition: service_healthy
