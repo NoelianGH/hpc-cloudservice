@@ -1,108 +1,139 @@
 import Link from "next/link";
 import TerminalCode from "@/components/TerminalCode";
 
-export const metadata = { title: "Gabung Jadi Relawan // HPC Cloud" };
+export const metadata = { title: "Gabung Jadi Relawan • IdleScale Cloud" };
 
 const STEPS = [
   {
-    t: "Daftar (5 menit)",
-    d: "Isi nama worker, username GitHub, dan email di halaman Register. Koordinator memeriksa akun GitHub (umur ≥ 30 hari, ≥ 2 repo publik) lalu mengirim kode OTP ke email. Setelah OTP benar, Anda mendapat WORKER_TOKEN pribadi.",
+    t: "Daftar Akun & Dapatkan Token (5 Menit)",
+    d: "Isi nama worker, username GitHub, dan email di halaman pendaftaran. Koordinator memeriksa keaslian akun GitHub Anda (umur akun ≥ 30 hari, minimal 2 repo publik) lalu mengirim kode OTP ke email. Setelah OTP terverifikasi, Anda langsung memperoleh WORKER_TOKEN pribadi.",
   },
   {
-    t: "Siapkan laptop (sekali saja)",
-    d: "Windows 10/11 dengan WSL2 (Ubuntu) dan Docker Desktop (WSL Integration aktif). Clone repo proyek ke ~ di WSL, lalu isi WORKER_TOKEN, WORKER_ID, dan COORDINATOR_URL di file .env.",
+    t: "Konfigurasi Lingkungan (Hanya Sekali)",
+    d: "Siapkan laptop Windows 10/11 dengan WSL2 (Ubuntu) dan Docker Desktop (aktifkan WSL Integration), atau sistem operasi Linux. Clone repositori proyek ke WSL, lalu masukkan WORKER_TOKEN, WORKER_ID, dan COORDINATOR_URL ke dalam file .env.",
   },
   {
-    t: "Nyalakan worker",
-    d: "./hpc.sh worker-up menjalankan 1 kontainer sandbox. Worker menarik tugas kecil (umumnya di bawah 15 detik) dari antrean FIFO, menghitung, dan mengirim hasil. Matikan kapan saja dengan ./hpc.sh worker-down; tugas yang belum selesai otomatis dialihkan ke relawan lain.",
+    t: "Nyalakan Worker Sandbox",
+    d: "Perintah ./hpc.sh worker-up menjalankan kontainer sandbox yang terisolasi aman. Worker akan otomatis menarik tugas komputasi kecil (di bawah 15 detik), menghitung, dan mengirim hasilnya kembali. Anda bisa mematikannya kapan saja tanpa merusak sistem.",
   },
   {
-    t: "Kumpulkan kredit",
-    d: "Setiap tugas yang hasilnya sama dengan worker lain (quorum) memberi kredit. Pantau kredit, peringkat, dan riwayat tugas di Dashboard Relawan dan Leaderboard.",
+    t: "Kumpulkan Kredit & Lencana",
+    d: "Setiap tugas yang hasilnya tervalidasi oleh quorum multi-node memberikan kredit komputasi. Pantau skor, lencana pencapaian, dan peringkat kontributor Anda di Leaderboard.",
   },
   {
-    t: "Ambil sertifikat",
-    d: "Setelah syarat kredit terpenuhi, klik Ambil Sertifikat di dashboard. Sertifikat punya kode unik yang bisa diverifikasi siapa pun, cocok untuk CV, portofolio, atau LinkedIn.",
+    t: "Klaim Sertifikat Resmi",
+    d: "Setelah mencapai target kredit minimum, Anda dapat mengklaim Sertifikat Kontributor Resmi dengan kode verifikasi unik publik yang dapat dilampirkan pada CV, profil LinkedIn, maupun portofolio akademik.",
   },
 ];
 
 const BENEFITS = [
-  ["Sertifikat kontributor terverifikasi", "Kode unik HPC-XXXXXXXXXX, bisa dicek keasliannya secara publik di /certificate/<kode>."],
-  ["Kredit, lencana, dan leaderboard", "Perintis (1), Perunggu (25), Perak (100), Emas (250 kredit). Peringkat tampil di Leaderboard."],
-  ["Pengalaman praktis", "Docker, WSL2, sistem terdistribusi, dan komputasi paralel nyata, dengan log yang bisa Anda baca sendiri."],
-  ["Kontrol penuh atas laptop", "Batas 1 CPU dan 512 MB RAM per worker; nyala/mati kapan saja; tidak ada akses ke file laptop Anda."],
+  ["Sertifikat Kontributor Terverifikasi", "Dilengkapi kode unik resmi (IDLESCALE-XXXXXXXXXX) yang dapat diverifikasi keasliannya secara publik."],
+  ["Peringkat Leaderboard & Lencana", "Tingkatkan tier kontribusi Anda: Perintis (1), Perunggu (25), Perak (100), hingga Emas (250 kredit)."],
+  ["Pengalaman Komputasi Terdistribusi", "Mendalami ekosistem Docker, WSL2, container hardening, dan arsitektur komputasi grid berskala besar."],
+  ["Kontrol & Keamanan Total", "Dibatasi ketat 1 CPU dan 512 MB RAM per worker. Tidak ada akses ke dokumen pribadi atau direktori laptop Anda."],
 ];
 
 const FAQ = [
-  ["Apakah laptop saya aman?", "Worker berjalan di kontainer non-root, read-only, tanpa capability Linux, tanpa akses folder laptop maupun docker.sock, dibatasi CPU/RAM/jumlah proses. Kode tugas hanya diambil dari repo job pada commit SHA tertentu yang bisa Anda baca sendiri di GitHub."],
-  ["Apakah butuh Jupyter atau MPI?", "Tidak. Semua tugas adalah program Python kecil di dalam kontainer; komunikasi antar-tahap lewat koordinator (HTTP), jadi ringan untuk laptop mahasiswa."],
-  ["Data apa yang disimpan?", "Nama worker, username GitHub, email (hanya untuk OTP, tidak pernah tampil publik), serta catatan tugas yang Anda kerjakan."],
-  ["Bagaimana jika saya mematikan laptop di tengah tugas?", "Tidak masalah. Lease tugas habis dalam ~30 detik dan tugas dikembalikan ke antrean untuk relawan lain. Hanya kredit tugas itu yang tidak Anda dapat."],
-  ["Bisakah curang untuk menambah kredit?", "Setiap tugas dikerjakan minimal 2 worker berbeda dan hash hasilnya dibandingkan. Hasil yang berbeda ditolak, tidak memberi kredit, dan admin dapat menangguhkan worker."],
+  ["Apakah laptop saya tetap aman saat worker berjalan?", "Sangat aman. Worker berjalan di dalam kontainer Docker dengan hak akses non-root, read-only rootfs, tanpa capability Linux (cap-drop ALL), tanpa akses folder laptop maupun docker.sock, serta kuota CPU & RAM terkunci rapi."],
+  ["Apakah membutuhkan spesifikasi hardware tinggi atau GPU khusus?", "Tidak perlu. Tugas komputasi dirancang dalam bentuk batch Python ringan yang dioptimasi untuk CPU biasa. Laptop mahasiswa dengan RAM tersisa 1 GB sudah sangat cukup."],
+  ["Data apa saja yang tersimpan di sistem?", "Hanya nama worker, username GitHub, email (khusus untuk pengiriman OTP rahasia dan tidak pernah dipublikasikan), serta log histori tugas yang telah Anda selesaikan."],
+  ["Bagaimana jika laptop saya matikan atau terputus internet?", "Tidak masalah sama sekali. Lease tugas akan kedaluwarsa secara otomatis dalam ~30 detik dan tugas akan dialihkan ke relawan lain di jaringan. Sistem tidak akan mengalami error."],
+  ["Bisakah terjadi kecurangan hasil komputasi?", "Setiap tugas dikerjakan secara paralel oleh minimal 2-4 worker berbeda dan hasilnya diverifikasi silang (quorum consensus). Hasil yang dimanipulasi akan langsung didiskualifikasi oleh validator."],
 ];
 
 export default function JoinPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 font-mono sm:px-6 lg:px-8">
-      <span className="text-xs font-bold uppercase tracking-widest text-cyber-amber-bright">// REKRUTMEN RELAWAN</span>
-      <h1 className="mt-1 text-2xl font-extrabold text-white sm:text-4xl">PINJAMKAN CPU LAPTOPMU, DAPATKAN SERTIFIKAT</h1>
-      <p className="mt-3 max-w-3xl text-sm text-zinc-400">
-        Kami mencari mahasiswa yang mau menyumbangkan sebagian daya komputasi laptopnya untuk menjalankan tugas-tugas
-        komputasi kecil (simulasi panas 2D, Monte Carlo, dan lainnya). Tidak perlu keahlian HPC; cukup laptop dengan
-        WSL2 + Docker dan akun GitHub.
+    <div className="mx-auto max-w-6xl px-4 py-12 font-sans sm:px-6 lg:px-8">
+      <div className="inline-flex items-center space-x-2 rounded-full border border-cyber-amber/40 bg-cyber-surface px-3 py-1 text-xs text-cyber-amber-bright mb-4">
+        <span className="h-1.5 w-1.5 rounded-full bg-cyber-amber-bright"></span>
+        <span className="font-mono uppercase tracking-wider">Program Relawan Komputasi</span>
+      </div>
+
+      <h1 className="text-2xl font-extrabold text-white sm:text-4xl tracking-tight">
+        Sumbangkan Daya Idle Komputer Anda, Raih Sertifikat Resmi
+      </h1>
+      <p className="mt-3 max-w-3xl text-sm sm:text-base text-zinc-300 leading-relaxed font-normal">
+        Bantu penelitian sains dan simulasi komputasi dengan meminjamkan CPU yang sedang menganggur. 
+        Setup mudah dan ringan di Windows (WSL2 + Docker) atau Linux, tanpa perlu keahlian server tingkat tinggi.
       </p>
-      <div className="mt-6 flex flex-wrap gap-3 text-xs">
-        <Link href="/register" className="rounded border border-cyber-amber bg-cyber-amber px-4 py-2.5 font-bold text-cyber-void shadow-amber-glow hover:bg-cyber-amber-bright">
-          DAFTAR SEKARANG &rarr;
+
+      <div className="mt-6 flex flex-wrap gap-3 text-xs font-semibold">
+        <Link href="/register" className="flex items-center space-x-2 rounded border border-cyber-amber bg-cyber-amber px-5 py-2.5 text-cyber-void shadow-amber-glow transition-all hover:bg-cyber-amber-bright hover:scale-105">
+          <span>DAFTAR JADI RELAWAN</span>
+          <span>&rarr;</span>
         </Link>
-        <Link href="/leaderboard" className="rounded border border-cyber-border px-4 py-2.5 text-zinc-300 hover:border-cyber-amber">
-          LIHAT LEADERBOARD
+        <Link href="/appreciation" className="rounded border border-cyber-border px-5 py-2.5 text-zinc-300 hover:border-cyber-amber hover:text-cyber-amber-bright transition-colors">
+          LIHAT PAPAN APRESIASI
         </Link>
       </div>
 
-      <h2 className="mt-12 text-sm font-bold text-cyber-amber-bright">// YANG KAMU DAPAT</h2>
-      <div className="mt-3 grid gap-4 md:grid-cols-2">
-        {BENEFITS.map(([t, d]) => (
-          <div key={t} className="cyber-box p-4">
-            <div className="text-sm font-bold text-white">{t}</div>
-            <p className="mt-1 text-xs text-zinc-400">{d}</p>
-          </div>
-        ))}
-      </div>
-
-      <h2 className="mt-12 text-sm font-bold text-cyber-amber-bright">// SYARAT</h2>
-      <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-zinc-300">
-        <li>Mahasiswa aktif (prioritas mahasiswa Informatika / Ilmu Komputer), laptop Windows 10/11 atau Linux.</li>
-        <li>WSL2 Ubuntu + Docker Desktop, sisa RAM minimal 1 GB saat worker berjalan.</li>
-        <li>Akun GitHub berumur ≥ 30 hari dengan ≥ 2 repositori publik (mencegah akun palsu).</li>
-        <li>Email aktif untuk menerima kode OTP.</li>
-      </ul>
-
-      <h2 className="mt-12 text-sm font-bold text-cyber-amber-bright">// LANGKAH BERGABUNG</h2>
-      <ol className="mt-3 space-y-3">
-        {STEPS.map((s, i) => (
-          <li key={s.t} className="cyber-box flex gap-4 p-4">
-            <span className="text-xl font-bold text-cyber-amber-bright">{String(i + 1).padStart(2, "0")}</span>
-            <div>
-              <div className="text-sm font-bold text-white">{s.t}</div>
-              <p className="mt-1 text-xs text-zinc-400">{s.d}</p>
+      <div className="mt-14">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-cyber-amber-bright font-mono">
+          Keuntungan Kontributor
+        </h2>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {BENEFITS.map(([t, d]) => (
+            <div key={t} className="cyber-box p-5 rounded-lg border border-cyber-border/70 hover:border-cyber-amber/60 transition-all">
+              <div className="text-sm font-bold text-white flex items-center space-x-2">
+                <span className="text-cyber-amber-bright">●</span>
+                <span>{t}</span>
+              </div>
+              <p className="mt-2 text-xs text-zinc-400 leading-relaxed font-normal">{d}</p>
             </div>
-          </li>
-        ))}
-      </ol>
-      <TerminalCode
-        title="COMPUTE NODE // WSL2 BASH"
-        code={`git clone https://github.com/NoelianGH/hpc-cloudservice.git ~/hpc-cloudservice\ncd ~/hpc-cloudservice && chmod +x hpc.sh\n./hpc.sh worker-login     # atau daftar di web, lalu isi WORKER_TOKEN & WORKER_ID di .env\n# isi COORDINATOR_URL di .env dengan alamat dari panitia\n./hpc.sh worker-up 1\n./hpc.sh worker-logs`}
-      />
+          ))}
+        </div>
+      </div>
 
-      <h2 className="mt-12 text-sm font-bold text-cyber-amber-bright">// PERTANYAAN UMUM</h2>
-      <div className="mt-3 space-y-3">
-        {FAQ.map(([q, a]) => (
-          <details key={q} className="cyber-box p-4">
-            <summary className="cursor-pointer text-sm font-bold text-white">{q}</summary>
-            <p className="mt-2 text-xs text-zinc-400">{a}</p>
-          </details>
-        ))}
+      <div className="mt-14">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-cyber-amber-bright font-mono">
+          Persyaratan Relawan
+        </h2>
+        <div className="mt-4 rounded-lg border border-cyber-border bg-cyber-surface/60 p-5">
+          <ul className="list-disc space-y-2 pl-5 text-xs text-zinc-300 leading-relaxed">
+            <li>Mahasiswa atau umum dengan perangkat PC / Laptop bersistem operasi Windows 10/11 (WSL2) atau Linux.</li>
+            <li>Docker Desktop terpasang dengan WSL Integration aktif, dan kapasitas RAM minimum 1 GB saat worker aktif.</li>
+            <li>Akun GitHub berumur minimal 30 hari dengan sedikitnya 2 repositori publik (untuk validasi reputasi anti-bot).</li>
+            <li>Alamat email aktif untuk menerima kode verifikasi OTP rahasia.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="mt-14">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-cyber-amber-bright font-mono">
+          Tahapan Pendaftaran & Aktivasi Node
+        </h2>
+        <ol className="mt-4 space-y-3">
+          {STEPS.map((s, i) => (
+            <li key={s.t} className="cyber-box flex gap-4 p-5 rounded-lg">
+              <span className="font-mono text-xl font-bold text-cyber-amber-bright">{String(i + 1).padStart(2, "0")}</span>
+              <div>
+                <div className="text-sm font-bold text-white">{s.t}</div>
+                <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-normal">{s.d}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="mt-6">
+          <TerminalCode
+            title="Terminal • Perintah Eksekusi di WSL2 / Linux"
+            code={`git clone https://github.com/NoelianGH/hpc-cloudservice.git ~/hpc-cloudservice\ncd ~/hpc-cloudservice && chmod +x hpc.sh\n./hpc.sh worker-login     # atau gunakan token dari halaman web register\n./hpc.sh worker-up 1\n./hpc.sh worker-logs`}
+          />
+        </div>
+      </div>
+
+      <div className="mt-14">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-cyber-amber-bright font-mono">
+          Pertanyaan yang Sering Diajukan (FAQ)
+        </h2>
+        <div className="mt-4 space-y-3">
+          {FAQ.map(([q, a]) => (
+            <details key={q} className="cyber-box p-5 rounded-lg border border-cyber-border/70">
+              <summary className="cursor-pointer text-sm font-bold text-white">{q}</summary>
+              <p className="mt-2 text-xs text-zinc-400 leading-relaxed font-normal">{a}</p>
+            </details>
+          ))}
+        </div>
       </div>
     </div>
   );

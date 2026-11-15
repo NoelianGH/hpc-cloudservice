@@ -8,7 +8,7 @@ interface TerminalCodeProps {
 }
 
 export default function TerminalCode({
-  title = "BASH // CLI EXECUTION",
+  title = "Terminal Command",
   code,
   language = "bash",
 }: TerminalCodeProps) {
@@ -21,7 +21,7 @@ export default function TerminalCode({
   };
 
   return (
-    <div className="relative my-3 overflow-hidden rounded border border-cyber-border bg-cyber-black font-mono text-xs shadow-2xl">
+    <div className="relative my-3 overflow-hidden rounded-lg border border-cyber-border bg-cyber-black font-mono text-xs shadow-2xl">
       {/* Terminal Titlebar */}
       <div className="flex items-center justify-between border-b border-cyber-border bg-cyber-surface/90 px-3 py-1.5">
         <div className="flex items-center space-x-2">
@@ -30,7 +30,7 @@ export default function TerminalCode({
             <span className="h-2 w-2 rounded-full bg-amber-500/80"></span>
             <span className="h-2 w-2 rounded-full bg-emerald-500/80"></span>
           </div>
-          <span className="text-[10px] text-zinc-400 font-semibold tracking-wider">
+          <span className="text-[11px] text-zinc-300 font-medium tracking-wide">
             {title}
           </span>
         </div>
@@ -39,9 +39,9 @@ export default function TerminalCode({
           className="flex items-center space-x-1 rounded border border-cyber-border px-2 py-0.5 text-[10px] text-zinc-300 transition-colors hover:border-cyber-amber hover:text-cyber-amber-bright active:scale-95"
         >
           {copied ? (
-            <span className="text-emerald-400 font-bold">COPIED [✓]</span>
+            <span className="text-emerald-400 font-semibold">Tersalin ✓</span>
           ) : (
-            <span>COPY COMMAND</span>
+            <span>Salin Perintah</span>
           )}
         </button>
       </div>

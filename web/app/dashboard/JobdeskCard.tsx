@@ -65,7 +65,7 @@ export default function JobdeskCard() {
   return (
     <section className="cyber-box p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-cyber-border pb-2">
-        <h2 className="text-xs font-bold text-cyber-amber-bright">// JOBDESK SAYA (PERAN DEVELOPER)</h2>
+        <h2 className="text-xs font-bold text-cyber-amber-bright uppercase tracking-wider">Jobdesk Pengembang Saya</h2>
         {repo && (
           <a href={repo} target="_blank" rel="noreferrer" className="text-[11px] text-zinc-400 underline">
             {d.project.app_name} &bull; {repo.replace("https://github.com/", "")}

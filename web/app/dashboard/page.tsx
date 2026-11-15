@@ -6,16 +6,24 @@ import JobdeskCard from "./JobdeskCard";
 
 // Data dari koordinator (lewat /api/volunteer/me dan /api/jobs). Tidak ada angka contoh.
 type Me = {
-  worker: { id: string; name: string; github_username: string | null; email: string | null; status: string;
-            created_at: string; online: boolean; last_seen: string };
-  stats: { credits: number; rank: number | null; of: number; badge: string | null;
-           next_badge: { name: string; credits: number } | null; tasks_validated: number;
-           tasks_rejected: number; tasks_expired: number; reject_pct: number; jobs_joined: number;
-           compute_seconds: number };
-  certificate: { eligible: boolean; missing: string[]; min_credits: number; max_reject_pct: number;
-                 progress_pct: number; issued: { code: string; issued_at: string; credits: number } | null };
-  recent: Array<{ id: number; task_id: number; job_id: number; kind: string; stage: number; n_stages: number;
-                  outcome: string; credit: number; seconds: number | null; started_at: string }>;
+  worker: {
+    id: string; name: string; github_username: string | null; email: string | null; status: string;
+    created_at: string; online: boolean; last_seen: string
+  };
+  stats: {
+    credits: number; rank: number | null; of: number; badge: string | null;
+    next_badge: { name: string; credits: number } | null; tasks_validated: number;
+    tasks_rejected: number; tasks_expired: number; reject_pct: number; jobs_joined: number;
+    compute_seconds: number
+  };
+  certificate: {
+    eligible: boolean; missing: string[]; min_credits: number; max_reject_pct: number;
+    progress_pct: number; issued: { code: string; issued_at: string; credits: number } | null
+  };
+  recent: Array<{
+    id: number; task_id: number; job_id: number; kind: string; stage: number; n_stages: number;
+    outcome: string; credit: number; seconds: number | null; started_at: string
+  }>;
 };
 type Job = {
   id: number; kind: string; status: string; n_stages: number; current_stage: number; total: number; done: number;
@@ -47,6 +55,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [certMsg, setCertMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [consentSubmitting, setConsentSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/volunteer/me", { cache: "no-store" });
@@ -71,9 +81,35 @@ export default function DashboardPage() {
     return () => clearInterval(t);
   }, [load]);
 
-  const logout = async () => {
-    await fetch("/api/volunteer/logout", { method: "POST" }).catch(() => undefined);
-    window.location.href = "/login";
+  const handleLogoutClick = () => {
+    // Buka floating modal persetujuan apresiasi sebelum logout
+    setShowConsentModal(true);
+  };
+
+  const handleConfirmLogout = async (giveConsent: boolean) => {
+    setConsentSubmitting(true);
+    try {
+      // 1. Kirim izin consent relawan ke koordinator
+      await fetch("/api/volunteer/appreciation-consent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consent: giveConsent }),
+      }).catch(() => undefined);
+
+      // 2. Hapus sesi login worker
+      await fetch("/api/volunteer/logout", { method: "POST" }).catch(() => undefined);
+
+      // 3. Jika setuju tampil, arahkan langsung ke halaman appreciation agar melihat profilnya!
+      if (giveConsent) {
+        window.location.href = "/appreciation";
+      } else {
+        window.location.href = "/login";
+      }
+    } catch {
+      window.location.href = "/login";
+    } finally {
+      setConsentSubmitting(false);
+    }
   };
 
   const claimCertificate = async () => {
@@ -113,8 +149,8 @@ export default function DashboardPage() {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-cyber-border pb-4 gap-4">
           <div>
-            <span className="text-xs font-bold uppercase tracking-widest text-cyber-amber-bright">
-              // DASHBOARD RELAWAN {me.worker.online ? "• WORKER ONLINE" : "• WORKER OFFLINE"}
+            <span className="text-xs font-bold uppercase tracking-wider text-cyber-amber-bright font-mono">
+              Dashboard Relawan {me.worker.online ? "• Worker Online" : "• Worker Offline"}
             </span>
             <h1 className="mt-1 text-2xl font-extrabold text-white sm:text-3xl">{me.worker.name}</h1>
             <p className="mt-1 text-xs text-zinc-400">
@@ -128,10 +164,13 @@ export default function DashboardPage() {
                 LENCANA {s.badge.toUpperCase()}
               </span>
             )}
-            <Link href="/leaderboard" className="rounded border border-cyber-border px-3 py-1.5 text-zinc-300 hover:border-cyber-amber">
-              LEADERBOARD
+            <Link href="/appreciation" className="rounded border border-cyber-border px-3 py-1.5 text-zinc-300 hover:border-cyber-amber hover:text-cyber-amber-bright transition-colors">
+              PAPAN APRESIASI
             </Link>
-            <button onClick={logout} className="rounded border border-cyber-border px-3 py-1.5 text-zinc-300 hover:border-red-500">
+            <button
+              onClick={handleLogoutClick}
+              className="rounded border border-cyber-border px-3 py-1.5 text-zinc-300 hover:border-red-500 hover:text-red-400 transition-colors"
+            >
               KELUAR
             </button>
           </div>
@@ -153,7 +192,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Sertifikat */}
           <div className="cyber-box p-6 space-y-3">
-            <div className="text-xs font-bold text-cyber-amber-bright">// SERTIFIKAT KONTRIBUTOR</div>
+            <div className="text-xs font-bold text-cyber-amber-bright uppercase tracking-wider font-mono">Sertifikat Kontributor</div>
             <div className="h-2 w-full rounded bg-cyber-black">
               <div className="h-2 rounded bg-cyber-amber" style={{ width: `${cert.progress_pct}%` }} />
             </div>
@@ -191,12 +230,12 @@ export default function DashboardPage() {
 
           {/* Menjalankan worker */}
           <div className="cyber-box p-6 lg:col-span-2">
-            <div className="text-xs font-bold text-cyber-amber-bright">// JALANKAN WORKER ANDA (PERAN COMPUTE NODE)</div>
+            <div className="text-xs font-bold text-cyber-amber-bright uppercase tracking-wider font-mono">Jalankan Worker Anda (Peran Compute Node)</div>
             <p className="mt-1 text-[11px] text-zinc-400">
               Kredit hanya bertambah bila hasil worker Anda sama dengan hasil worker lain (replikasi + quorum).
             </p>
             <TerminalCode
-              title="COMPUTE NODE // BASH"
+              title="Terminal • Kontrol Worker WSL2"
               code={`./hpc.sh worker-status   # cek token di .env\n./hpc.sh worker-up 1      # jalankan 1 worker sandbox (1 CPU, 512 MB)\n./hpc.sh worker-logs      # pantau tugas yang dikerjakan`}
             />
           </div>
@@ -204,7 +243,7 @@ export default function DashboardPage() {
 
         {/* Job berjalan */}
         <div className="cyber-box p-6">
-          <div className="text-xs font-bold text-cyber-amber-bright">// JOB DI ANTREAN (FIFO)</div>
+          <div className="text-xs font-bold text-cyber-amber-bright uppercase tracking-wider font-mono">Antrean Tugas Komputasi (FIFO)</div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -237,7 +276,7 @@ export default function DashboardPage() {
 
         {/* Riwayat tugas */}
         <div className="cyber-box p-6">
-          <div className="text-xs font-bold text-cyber-amber-bright">// RIWAYAT TUGAS ANDA (25 TERAKHIR)</div>
+          <div className="text-xs font-bold text-cyber-amber-bright uppercase tracking-wider font-mono">Riwayat Tugas Terakhir Anda (25 Tugas)</div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -265,6 +304,84 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* ===================================================================== */}
+      {/* FLOATING CONSENT MODAL (SETELAH LOGOUT / SELESAI KERJA)              */}
+      {/* ===================================================================== */}
+      {showConsentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="relative w-full max-w-lg rounded-xl border border-cyber-amber/80 bg-cyber-void p-6 sm:p-7 shadow-2xl shadow-amber-950/50">
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-cyber-border pb-4">
+              <div className="flex items-center space-x-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyber-amber bg-cyber-surface text-cyber-amber-bright text-base">
+                  ⭐
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">
+                    Papan Apresiasi Kontributor
+                  </h3>
+                  <span className="font-mono text-[10px] text-cyber-amber-bright">
+                    APPRECIATION CONSENT CONFIRMATION
+                  </span>
+                </div>
+              </div>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                disabled={consentSubmitting}
+                onClick={() => setShowConsentModal(false)}
+                className="rounded border border-cyber-border bg-cyber-surface px-2 py-1 text-xs text-zinc-400 hover:border-cyber-amber hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content Modal */}
+            <div className="mt-4 space-y-3 font-sans text-xs">
+              <p className="text-zinc-200 leading-relaxed">
+                Terima kasih banyak atas kontribusi daya komputasi dari node <strong>{me.worker.name}</strong> untuk simulasi komputasi terbuka IdleScale!
+              </p>
+              <p className="text-zinc-400 leading-relaxed">
+                Sebelum Anda mengakhiri sesi komputasi dan keluar, apakah Anda bersedia dicantumkan di <strong>Papan Apresiasi (Appreciation Board)</strong> publik proyek ini?
+              </p>
+
+              {/* Warning Notice Box */}
+              <div className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3.5 text-amber-200 space-y-1.5 font-mono text-[11px]">
+                <div className="flex items-center space-x-2 font-bold text-cyber-amber-bright">
+                  <span>⚠️</span>
+                  <span>PERINGATAN PRIVASI & TAUTAN PROFIL:</span>
+                </div>
+                <p className="leading-relaxed text-zinc-300 font-sans">
+                  Jika Anda memilih <strong>&quot;Tampilkan Profil Saya&quot;</strong>, kartu apresiasi Anda akan memuat foto profil, nama, serta <strong>tombol tautan langsung yang mengarahkan pengunjung ke profil GitHub Anda (github.com/{me.worker.github_username || "username"})</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                disabled={consentSubmitting}
+                onClick={() => handleConfirmLogout(true)}
+                className="flex flex-1 items-center justify-center space-x-2 rounded-lg border border-cyber-amber bg-cyber-amber py-3 font-mono text-xs font-bold text-cyber-void shadow-amber-glow transition-all hover:bg-cyber-amber-bright hover:shadow-amber-glow-lg disabled:opacity-50"
+              >
+                <span>{consentSubmitting ? "MENYIMPAN..." : "✓ YA, TAMPILKAN DI APRESIASI"}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={consentSubmitting}
+                onClick={() => handleConfirmLogout(false)}
+                className="flex items-center justify-center rounded-lg border border-cyber-border bg-cyber-surface px-5 py-3 font-mono text-xs text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors disabled:opacity-50"
+              >
+                <span>TIDAK, KELUAR SAJA</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -91,7 +91,7 @@ function Panel({ title, right, children }: { title: string; right?: React.ReactN
   return (
     <section className="cyber-box p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-cyber-border pb-2">
-        <h2 className="text-xs font-bold text-cyber-amber-bright">// {title}</h2>
+        <h2 className="text-xs font-bold text-cyber-amber-bright uppercase tracking-wider">{title}</h2>
         {right}
       </div>
       {children}

@@ -27,15 +27,18 @@ export function sameOrigin(req: Request): boolean {
 
 export async function coordinatorFetch(
   path: string,
-  init: { method?: string; body?: string; token?: string } = {}
+  init: { method?: string; body?: string | Record<string, unknown>; token?: string } = {}
 ): Promise<{ status: number; data: any }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (init.token) headers["Authorization"] = `Bearer ${init.token}`;
+  const rawBody = init.body == null ? undefined
+    : typeof init.body === "string" ? init.body
+    : JSON.stringify(init.body);
   try {
     const res = await fetch(`${COORDINATOR_URL}${path}`, {
       method: init.method || "GET",
       headers,
-      body: init.body,
+      body: rawBody,
       cache: "no-store",
     });
     const text = await res.text();

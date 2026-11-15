@@ -4,8 +4,8 @@ import CyberNavbar from "@/components/CyberNavbar";
 import CyberFooter from "@/components/CyberFooter";
 
 export const metadata: Metadata = {
-  title: "HPC Cloud Service // Volunteer Computing Grid",
-  description: "Distributed volunteer high-performance computing with automated GitHub verification and sandboxed nodes.",
+  title: "IdleScale • Turn Idle Devices into Supercomputing Power",
+  description: "Platform komputasi terdistribusi generasi baru. Ubah kapasitas idle perangkat PC relawan menjadi kekuatan superkomputer terisolasi aman dengan validasi anti-fake GitHub.",
 };
 
 export default function RootLayout({

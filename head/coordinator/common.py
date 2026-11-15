@@ -30,7 +30,7 @@ def check_worker_auth(auth: str | None) -> dict:
     if token.startswith("hpc_w_"):
         with db() as c:
             w = c.execute(
-                "SELECT id, name, github_username, email, status FROM workers WHERE auth_token = %s",
+                "SELECT id, name, github_username, email, status, coalesce(show_in_appreciation, false) AS show_in_appreciation FROM workers WHERE auth_token = %s",
                 (token,)
             ).fetchone()
         if w:

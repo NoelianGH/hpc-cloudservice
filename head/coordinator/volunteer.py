@@ -20,6 +20,7 @@ import os
 import secrets
 
 from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
 
 from common import db, check_worker_auth
 
@@ -147,7 +148,8 @@ def me(authorization: str = Header(None)):
     return {
         "worker": {"id": w["id"], "name": w["name"], "github_username": w["github_username"],
                    "email": w["email"], "status": w["status"], "created_at": s["created_at"],
-                   "online": s["online"], "last_seen": s["last_seen"]},
+                   "online": s["online"], "last_seen": s["last_seen"],
+                   "show_in_appreciation": bool(w.get("show_in_appreciation", False))},
         "stats": {"credits": s["credits"], "rank": s["rank"], "of": len(ranked),
                   "badge": badge(s["credits"]), "next_badge": next_badge(s["credits"]),
                   "tasks_validated": s["tasks_validated"], "tasks_rejected": s["tasks_rejected"],
@@ -195,3 +197,60 @@ def verify_certificate(code: str):
         raise HTTPException(404, "Sertifikat tidak ditemukan")
     return {"valid": cert["worker_status"] == "active", "project": PROJECT_NAME,
             "badge": badge(cert["credits"]), **cert}
+
+
+# =============================================================================
+# PAPAN APRESIASI KONTRIBUTOR & KONSENSUS PRIVASI
+# =============================================================================
+
+class AppreciationConsentBody(BaseModel):
+    consent: bool
+
+@router.post("/api/volunteer/appreciation-consent")
+@router.post("/api/me/appreciation-consent")
+def set_appreciation_consent(body: AppreciationConsentBody, authorization: str = Header(None)):
+    """Mengatur izin relawan (consent) untuk ditampilkan di papan apresiasi publik."""
+    w = _individual(authorization)
+    with db() as c:
+        c.execute("""
+            UPDATE workers
+               SET show_in_appreciation = %s,
+                   appreciation_consent_at = now()
+             WHERE id = %s
+        """, (body.consent, w["id"]))
+    print(f"[APPRECIATION CONSENT] Worker @{w.get('github_username', w['id'])} set consent={body.consent}", flush=True)
+    return {"ok": True, "show_in_appreciation": body.consent}
+
+
+@router.get("/api/appreciation")
+def appreciation_list():
+    """
+    Papan Apresiasi Publik.
+    HANYA menampilkan relawan yang telah secara eksplisit memberikan persetujuan (consent)
+    saat logout atau di profil mereka.
+    """
+    with db() as c:
+        rows = c.execute("""
+            SELECT id, name, github_username, credits, created_at, last_seen, status,
+                   show_in_appreciation, appreciation_consent_at
+              FROM workers
+             WHERE show_in_appreciation = TRUE
+               AND github_username IS NOT NULL
+             ORDER BY credits DESC, created_at ASC
+        """).fetchall()
+
+    contributors = [{
+        "name": r["name"],
+        "github_username": r["github_username"],
+        "avatar_url": f"https://github.com/{r['github_username']}.png",
+        "github_url": f"https://github.com/{r['github_username']}",
+        "credits": r["credits"],
+        "badge": badge(r["credits"]),
+        "joined_at": r["created_at"].isoformat() if r["created_at"] else None,
+        "consent_at": r["appreciation_consent_at"].isoformat() if r["appreciation_consent_at"] else None,
+    } for r in rows]
+
+    return {
+        "contributors": contributors,
+        "total": len(contributors)
+    }

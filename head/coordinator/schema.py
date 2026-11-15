@@ -28,6 +28,9 @@ STATEMENTS = [
     # Kapasitas sandbox yang dilaporkan worker (dipakai mencocokkan spesifikasi resource job)
     "ALTER TABLE workers ADD COLUMN IF NOT EXISTS cpus REAL",
     "ALTER TABLE workers ADD COLUMN IF NOT EXISTS memory_mb INT",
+    # Izin tampil di papan apresiasi kontributor (consent relawan)
+    "ALTER TABLE workers ADD COLUMN IF NOT EXISTS show_in_appreciation BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE workers ADD COLUMN IF NOT EXISTS appreciation_consent_at TIMESTAMPTZ",
 
     # ---- Job: multi-tahap, kode dari repo job (SHA), resource, hasil ke branch ---
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'running'",  # running|done|failed

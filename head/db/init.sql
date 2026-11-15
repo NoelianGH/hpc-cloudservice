@@ -9,6 +9,8 @@ CREATE TABLE workers (
   credits         INT NOT NULL DEFAULT 0,
   cpus            REAL,                            -- kapasitas sandbox yang dilaporkan worker
   memory_mb       INT,
+  show_in_appreciation BOOLEAN NOT NULL DEFAULT FALSE, -- izin tampil di papan apresiasi publik
+  appreciation_consent_at TIMESTAMPTZ,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

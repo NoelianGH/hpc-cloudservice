@@ -42,20 +42,34 @@ export default function LoginPage() {
 
       <div className="mx-auto max-w-md">
         <div className="text-center">
-          <span className="font-mono text-xs font-semibold uppercase tracking-widest text-cyber-amber-bright">
-            // LOGIN RELAWAN
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-cyber-amber/60 bg-cyber-surface shadow-amber-glow-sm">
+            <svg
+              className="h-6 w-6 text-cyber-amber-bright"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2" />
+              <line x1="12" y1="22" x2="12" y2="12" />
+              <line x1="22" y1="8.5" x2="12" y2="12" />
+              <line x1="2" y1="8.5" x2="12" y2="12" />
+            </svg>
+          </div>
+          <span className="font-mono text-xs font-semibold uppercase tracking-wider text-cyber-amber-bright">
+            Portal Masuk Relawan
           </span>
           <h1 className="mt-2 font-mono text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
             MASUK KE DASHBOARD RELAWAN
           </h1>
           <p className="mt-2 font-mono text-xs text-zinc-400">
-            Lihat kredit, peringkat, riwayat tugas, dan ambil sertifikat kontributor Anda.
+            Lihat perolehan kredit, peringkat leaderboard, riwayat tugas, dan klaim sertifikat resmi Anda.
           </p>
         </div>
 
         {errorMsg && (
           <div className="mt-6 rounded border border-red-500/50 bg-red-950/40 p-3 font-mono text-xs text-red-300">
-            [ERROR]: {errorMsg}
+            Peringatan: {errorMsg}
           </div>
         )}
 

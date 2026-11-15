@@ -194,18 +194,18 @@ export default function RegisterPage() {
       <div className="mx-auto max-w-2xl">
         {/* Top Header Badge */}
         <div className="text-center">
-          <span className="font-mono text-xs font-semibold uppercase tracking-widest text-cyber-amber-bright">
-            // PROTOCOL: AUTH-GRID-REGISTRATION
+          <span className="font-mono text-xs font-semibold uppercase tracking-wider text-cyber-amber-bright">
+            Aktivasi Node Relawan IdleScale
           </span>
           <h1 className="mt-2 font-mono text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
-            {step === 1 && "REGISTER VOLUNTEER WORKER"}
-            {step === 2 && "SECURITY OTP VERIFICATION"}
-            {step === 3 && "NODE ACTIVATION SUCCESSFUL"}
+            {step === 1 && "PENDAFTARAN WORKER NODE"}
+            {step === 2 && "VERIFIKASI KODE KEAMANAN OTP"}
+            {step === 3 && "AKTIVASI NODE BERHASIL"}
           </h1>
           <p className="mt-2 font-mono text-xs text-zinc-400">
-            {step === 1 && "Anti-fake validation gate verifies GitHub account age and repository count before granting worker authorization."}
-            {step === 2 && `Enter the 6-digit cryptographic security code sent to ${formData.email}`}
-            {step === 3 && "Your worker token is authorized. Pull the repository and run your compute container."}
+            {step === 1 && "Gerbang validasi reputasi anti-fake memeriksa akun GitHub Anda sebelum memberikan izin akses worker."}
+            {step === 2 && `Masukkan 6 digit kode OTP rahasia yang telah dikirim ke ${formData.email}`}
+            {step === 3 && "Token worker Anda telah resmi terverifikasi. Anda siap menjalankan kontainer komputasi."}
           </p>
         </div>
 
@@ -241,7 +241,7 @@ export default function RegisterPage() {
         {errorMsg && (
           <div className="mt-6 rounded border border-red-500/50 bg-red-950/40 p-4 font-mono text-xs text-red-200">
             <div className="flex items-start space-x-2">
-              <span className="text-red-400 font-bold">[ALERT // FAILED]:</span>
+              <span className="text-red-400 font-bold">Peringatan:</span>
               <div className="flex-1 whitespace-pre-line">{errorMsg}</div>
             </div>
           </div>
@@ -521,10 +521,10 @@ export default function RegisterPage() {
               </div>
               <div>
                 <h3 className="font-mono text-sm font-bold text-white">
-                  VERIFICATION SUCCESSFUL // NODE AUTHORIZED
+                  VERIFIKASI BERHASIL • NODE RESMI DIIZINKAN
                 </h3>
                 <p className="font-mono text-xs text-emerald-400">
-                  Worker status: ACTIVE &bull; Ready for HPC jobdesk assignment
+                  Status Worker: AKTIF &bull; Siap menerima pembagian tugas komputasi
                 </p>
               </div>
             </div>
@@ -541,12 +541,12 @@ export default function RegisterPage() {
               </div>
               <div className="flex justify-between items-center border-b border-cyber-border/60 pb-2">
                 <span className="text-zinc-400">GITHUB USERNAME:</span>
-                <span className="text-emerald-400">@{verifiedWorker.github_username} [VERIFIED]</span>
+                <span className="text-emerald-400">@{verifiedWorker.github_username} (Terverifikasi)</span>
               </div>
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-zinc-400">AUTHORIZED WORKER_TOKEN:</span>
-                  <span className="text-[10px] text-zinc-500">SECRET</span>
+                  <span className="text-[10px] text-zinc-500">RAHASIA</span>
                 </div>
                 <div className="overflow-x-auto rounded bg-cyber-surface p-2 text-cyber-amber-bright border border-cyber-amber/30 select-all font-mono text-[11px]">
                   {verifiedWorker.worker_token}
@@ -556,16 +556,16 @@ export default function RegisterPage() {
 
             {/* Execution instructions */}
             <div className="mt-6">
-              <h4 className="font-mono text-xs font-bold text-cyber-amber-bright">
-                // EXECUTE YOUR COMPUTE NODE
+              <h4 className="font-mono text-xs font-bold text-cyber-amber-bright uppercase tracking-wider">
+                Jalankan Node Komputasi Anda
               </h4>
               <p className="mt-1 font-mono text-xs text-zinc-400">
-                Pull the repository and run the worker container with your verified token:
+                Clone repo dan jalankan kontainer worker dengan token terverifikasi Anda:
               </p>
 
               <TerminalCode
-                title="RUN YOUR WORKER // BASH"
-                code={`# 1. Masuk ke folder proyek dan tarik pembaruan\ncd ~/cloud-hpc && git pull\n\n# 2. Masukkan token Anda ke file .env\necho "WORKER_TOKEN=${verifiedWorker.worker_token}" >> .env\necho "WORKER_ID=${verifiedWorker.worker_id}" >> .env\necho "WORKER_NAME=${verifiedWorker.worker_name}" >> .env\n\n# 3. Jalankan worker sandbox dalam Docker\n./hpc.sh worker-up 1\n\n# 4. Pantau komputasi Anda\n./hpc.sh worker-logs`}
+                title="Terminal • Eksekusi Worker di WSL2 / Linux"
+                code={`# 1. Masuk ke folder proyek dan tarik pembaruan\ncd ~/hpc-cloudservice && git pull\n\n# 2. Masukkan token Anda ke file .env\necho "WORKER_TOKEN=${verifiedWorker.worker_token}" >> .env\necho "WORKER_ID=${verifiedWorker.worker_id}" >> .env\necho "WORKER_NAME=${verifiedWorker.worker_name}" >> .env\n\n# 3. Jalankan worker sandbox dalam Docker\n./hpc.sh worker-up 1\n\n# 4. Pantau komputasi Anda secara realtime\n./hpc.sh worker-logs`}
               />
             </div>
 
