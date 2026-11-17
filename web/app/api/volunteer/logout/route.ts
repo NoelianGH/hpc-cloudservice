@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   if (!sameOrigin(req)) {
     return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
   }
-  const session = cookies().get(WORKER_COOKIE)?.value;
+  const session = (await cookies()).get(WORKER_COOKIE)?.value;
   if (session) await coordinatorFetch("/api/auth/logout", { method: "POST", token: session });
   const res = NextResponse.json({ ok: true });
   clearWorkerCookie(res);

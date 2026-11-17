@@ -11,6 +11,7 @@ type Project = {
   enabled: boolean; repo_url: string | null; app_name: string; default_branch: string; branch_prefix: string;
   github_token: boolean; webhook: boolean; poll_seconds: number; require_ci_pass: boolean; max_active: number;
   ci_replicas: number; ci_resources: { cpus: number; memory_mb: number; timeout_s: number };
+  auto_assign?: boolean; node_access?: boolean;
 };
 type Jobdesk = {
   id: number; title: string; description: string; kind: string; credit: number; status: string;
@@ -18,6 +19,15 @@ type Jobdesk = {
   note: string | null; last_sha: string | null; last_ci_job: number | null; last_ci_status: string | null;
   pr_number: number | null; pr_url: string | null; merged_sha: string | null; worker_online: boolean;
   created_at: string; assigned_at: string | null; submitted_at: string | null; done_at: string | null; updated_at: string;
+  node_user?: string | null; node_name?: string | null; node_sessions?: number | null; node_ready?: boolean | null;
+  node_last_login?: string | null; node_expires_at?: string | null; node_last_revoke?: string | null;
+};
+type NodeRow = {
+  name: string; ip: string | null; last_seen: string; max_users: number; online: boolean; users: number; ssh_port: number | null;
+};
+type NodesData = {
+  enabled: boolean; nodes: NodeRow[]; ssh: { host: string; port: number; online_hosts: Record<string, string> };
+  capacity: { nodes: number; total: number; used: number; free: number }; git_token: boolean;
 };
 type JdEvent = { jobdesk_id: number; at: string; actor: string; event: string; detail: string | null };
 type CiTask = {
@@ -119,7 +129,9 @@ export function ProjectBanner({ p }: { p: Project | null }) {
     );
   }
   const warn: string[] = [];
-  if (!p.github_token) warn.push("PROJECT_GIT_TOKEN kosong: branch jobdesk, undangan collaborator, Pull Request, merge, dan centang CI di GitHub harus manual");
+  if (!p.github_token) warn.push(p.node_access
+    ? "PROJECT_GIT_TOKEN kosong: relawan tidak bisa clone/push dari compute node, dan branch, Pull Request, merge, serta centang CI harus manual"
+    : "PROJECT_GIT_TOKEN kosong: branch jobdesk, undangan collaborator, Pull Request, merge, dan centang CI di GitHub harus manual");
   if (!p.webhook && !p.poll_seconds) warn.push("webhook dan polling mati: push tidak akan terdeteksi");
   return (
     <div className="rounded border border-cyber-border bg-cyber-surface/60 p-3 text-[11px] text-zinc-300">
@@ -139,7 +151,7 @@ export function ProjectBanner({ p }: { p: Project | null }) {
 // Tab: Jobdesk (papan tugas)
 // =============================================================================
 const COLUMNS: { key: string; label: string; hint: string }[] = [
-  { key: "open", label: "ANTRE (FIFO)", hint: "otomatis di-assign dari atas ke relawan yang worker-nya online" },
+  { key: "open", label: "ANTRE (FIFO)", hint: "relawan menekan AMBIL JOBDESK di website dan mendapat yang paling atas" },
   { key: "in_progress", label: "DIKERJAKAN", hint: "relawan ngoding di branch-nya sampai selesai" },
   { key: "review", label: "REVIEW", hint: "CI lulus, PR dibuka sistem; setujui = merge PR" },
   { key: "done", label: "SELESAI", hint: "PR di-merge, kredit diberikan" },
@@ -158,6 +170,7 @@ export function JobdeskTab({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [kind, setKind] = useState("fitur");
   const [credit, setCredit] = useState(10);
   const [showDone, setShowDone] = useState(false);
+  const [nodes, setNodes] = useState<NodesData | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -166,6 +179,7 @@ export function JobdeskTab({ onUnauthorized }: { onUnauthorized: () => void }) {
       setEvents(d.events);
       setProject(d.project);
       setError(null);
+      if (d.project?.node_access) setNodes(await call<NodesData>("nodes"));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -216,6 +230,30 @@ export function JobdeskTab({ onUnauthorized }: { onUnauthorized: () => void }) {
     <div className="space-y-6">
       <ProjectBanner p={project} />
       <Msg error={error} notice={notice} />
+
+      {nodes?.enabled && (
+        <Panel title="COMPUTE NODE RELAWAN (SSH PER JOBDESK)">
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            {nodes.nodes.map((n) => (
+              <span key={n.name} className="rounded border border-cyber-border bg-black/30 px-2 py-1">
+                <span className={n.online ? "text-emerald-400" : "text-red-400"}>●</span>{" "}
+                <span className="font-bold text-white">{n.name}</span>{" "}
+                <span className="text-zinc-400">
+                  {n.online ? "online" : `offline ${ago(n.last_seen)}`} &bull; {n.users}/{n.max_users} relawan &bull; port {n.ssh_port ?? nodes.ssh.port}
+                  {nodes.ssh.online_hosts[n.name] ? " • internet" : ""}
+                </span>
+              </span>
+            ))}
+            {!nodes.nodes.length && <span className="text-cyber-amber-bright">Belum ada compute node yang terhubung. Jalankan <code>./hpc.sh head-up</code> (layanan node).</span>}
+          </div>
+          <p className="mt-2 text-[10px] text-zinc-500">
+            Slot: <span className={nodes.capacity.free > 0 ? "text-emerald-400" : "text-cyber-amber-bright"}>{nodes.capacity.free} kosong</span> dari {nodes.capacity.total}
+            {" "}&bull; relawan login: <code>ssh -p &lt;port node&gt; jd&lt;id&gt;@{nodes.ssh.host}</code>
+            {Object.keys(nodes.ssh.online_hosts).length ? " • internet aktif (cloudflared)" : " • internet: jalankan ./hpc.sh head-online"}
+            {" "}&bull; push hanya ke branch jobdesk lewat gerbang git koordinator &bull; akses dicabut otomatis saat SETUJUI / BATAL.
+          </p>
+        </Panel>
+      )}
 
       <Panel title="BUAT JOBDESK BARU (MASUK ANTREAN FIFO)">
         <form onSubmit={create} className="grid gap-3 md:grid-cols-6">
@@ -309,6 +347,19 @@ export function JobdeskTab({ onUnauthorized }: { onUnauthorized: () => void }) {
                         </a>
                       )}
                       {d.note && <p className="mt-1 text-[10px] text-cyber-amber-bright">Catatan: {d.note}</p>}
+                      {project?.node_access && ["in_progress", "review"].includes(d.status) && (
+                        <p className="mt-1 text-[10px] text-zinc-400">
+                          {d.node_user ? (
+                            <>
+                              node: <span className="text-white">{d.node_user}</span>@{d.node_name || "menunggu"}{" "}
+                              {d.node_sessions ? <span className="text-emerald-400">&bull; {d.node_sessions} sesi login</span>
+                                : d.node_last_login ? <span>&bull; login terakhir {ago(d.node_last_login)}</span>
+                                : <span>&bull; {d.node_ready ? "belum pernah login" : "disiapkan"}</span>}
+                              {d.node_expires_at && <span> &bull; token berlaku s/d {new Date(d.node_expires_at).toLocaleString("id-ID")}</span>}
+                            </>
+                          ) : <span className="text-cyber-amber-bright">akses compute node dicabut{d.node_last_revoke ? `: ${d.node_last_revoke}` : ""}</span>}
+                        </p>
+                      )}
                       <div className="mt-2 flex flex-wrap gap-1">
                         {d.status === "review" && (
                           <>
@@ -319,6 +370,14 @@ export function JobdeskTab({ onUnauthorized }: { onUnauthorized: () => void }) {
                         {["open", "in_progress", "review"].includes(d.status) && (
                           <button disabled={!!busy} onClick={() => window.confirm(`Batalkan jobdesk #${d.id}?`) && action(d, "cancel", "dibatalkan")} className={`${btn} border-red-900 text-red-400 hover:bg-red-950`}>BATAL</button>
                         )}
+                        {project?.node_access && ["in_progress", "review"].includes(d.status) && (d.node_user ? (
+                          <button disabled={!!busy} onClick={() => window.confirm(`Cabut akses compute node ${d.node_user}? Sesi SSH-nya langsung diputus; jobdesk tetap milik relawan.`) && act(`revoke-${d.id}`, `jobdesks/${d.id}/revoke-node`, { reason: "" }, `Akses compute node jobdesk #${d.id} dicabut.`)} className={`${btn} border-red-900 text-red-400 hover:bg-red-950`}>CABUT NODE</button>
+                        ) : (
+                          <>
+                            <button disabled={!!busy} onClick={() => act(`grant-${d.id}`, `jobdesks/${d.id}/grant-node`, {}, `Akses compute node jobdesk #${d.id} diterbitkan ulang (token node baru).`)} className={`${btn} border-cyber-border text-zinc-300 hover:border-cyber-amber`}>BERI AKSES NODE</button>
+                            <button disabled={!!busy} onClick={() => window.confirm(`Kembalikan jobdesk #${d.id} ke antrean? Relawan ${d.worker_name || ""} dilepas; branch dan commit yang sudah di-push tetap, relawan berikutnya (FIFO) melanjutkan.`) && action(d, "requeue", "dikembalikan ke antrean")} className={`${btn} border-cyber-border text-zinc-300 hover:border-cyber-amber`}>KEMBALIKAN KE ANTREAN</button>
+                          </>
+                        ))}
                         {(d.status === "cancelled" || d.status === "done") && (
                           <button disabled={!!busy} onClick={() => action(d, "reopen", "dibuka lagi")} className={`${btn} border-cyber-border text-zinc-300 hover:border-cyber-amber`}>BUKA LAGI</button>
                         )}

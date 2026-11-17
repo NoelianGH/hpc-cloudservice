@@ -17,7 +17,7 @@ async function proxy(req: Request, path: string[], method: "GET" | "POST") {
   if (method === "POST" && !sameOrigin(req)) {
     return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
   }
-  const token = cookies().get(ADMIN_COOKIE)?.value;
+  const token = (await cookies()).get(ADMIN_COOKIE)?.value;
   if (!token) {
     return NextResponse.json({ detail: "Belum login sebagai admin." }, { status: 401 });
   }
@@ -36,10 +36,10 @@ async function proxy(req: Request, path: string[], method: "GET" | "POST") {
   return res;
 }
 
-export async function GET(req: Request, { params }: { params: { path: string[] } }) {
-  return proxy(req, params.path, "GET");
+export async function GET(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  return proxy(req, (await params).path, "GET");
 }
 
-export async function POST(req: Request, { params }: { params: { path: string[] } }) {
-  return proxy(req, params.path, "POST");
+export async function POST(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  return proxy(req, (await params).path, "POST");
 }

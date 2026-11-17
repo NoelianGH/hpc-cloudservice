@@ -53,7 +53,6 @@ export interface VerifyOtpResponse {
   worker_id?: string;
   worker_name?: string;
   github_username?: string;
-  worker_token?: string;
   message?: string;
   detail?: string;
 }

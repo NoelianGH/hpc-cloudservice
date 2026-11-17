@@ -22,6 +22,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from admin_auth import DUMMY_HASH, hash_token, new_session_token, verify_password
+from common import client_ip
 
 DB_URL = os.environ["DATABASE_URL"]
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
@@ -95,7 +96,7 @@ def require_admin_session(auth: str | None) -> dict:
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "?"
+    return client_ip(request)
 
 
 def _locked(key: str) -> bool:

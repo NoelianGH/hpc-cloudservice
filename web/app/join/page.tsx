@@ -5,16 +5,16 @@ export const metadata = { title: "FAQ & Panduan Relawan • IdleScale Cloud" };
 
 const STEPS = [
   {
-    t: "Daftar Akun & Dapatkan Token (5 Menit)",
-    d: "Isi nama worker, username GitHub, email, dan password di halaman pendaftaran. Koordinator memeriksa keaslian akun GitHub Anda (umur akun ≥ 30 hari, minimal 2 repo publik) lalu mengirim kode OTP ke email. Setelah OTP terverifikasi Anda punya dua kredensial: email + password untuk login website (dashboard), dan WORKER_TOKEN pribadi untuk worker di terminal (CLI).",
+    t: "Daftar Akun (5 Menit)",
+    d: "Isi nama, username GitHub, email, dan password di halaman pendaftaran. Koordinator memeriksa keaslian akun GitHub Anda (umur akun ≥ 30 hari, minimal 2 repo publik) lalu mengirim kode OTP ke email. Setelah OTP terverifikasi, login website cukup dengan email + password.",
   },
   {
-    t: "Konfigurasi Lingkungan (Hanya Sekali)",
-    d: "Siapkan laptop Windows 10/11 dengan WSL2 (Ubuntu) dan Docker Desktop (aktifkan WSL Integration), atau Linux. Clone REPO WORKER (repo yang juga Anda kerjakan lewat jobdesk) ke WSL, lalu jalankan ./hpc.sh setup dengan alamat koordinator dan WORKER_TOKEN Anda. Perintah lengkapnya (sudah berisi alamat koordinator) ada di dashboard.",
+    t: "Ambil Jobdesk di Website",
+    d: "Di dashboard tekan AMBIL JOBDESK: sistem memberi jobdesk yang paling lama menunggu (FIFO) dan menyiapkan akses di salah satu compute node milik platform. Kartu jobdesk menampilkan perintah ssh dan TOKEN NODE (password ssh) yang hanya berlaku untuk jobdesk itu.",
   },
   {
-    t: "Nyalakan Worker Sandbox",
-    d: "Perintah ./hpc.sh up di folder repo worker menjalankan kontainer sandbox yang terisolasi aman. Worker akan otomatis menarik tugas komputasi kecil (di bawah 15 detik), menghitung, dan mengirim hasilnya kembali. Anda bisa mematikannya kapan saja tanpa merusak sistem.",
+    t: "Kerjakan di Compute Node",
+    d: "Login dari Command Prompt dengan ssh (sudah ada di Windows 10/11). Repo proyek sudah ter-clone di branch jobdesk Anda; hanya branch itu yang bisa di-push, dan setiap push otomatis diuji (CI). Selesai, jalankan 'jobdesk ajukan' untuk membuka Pull Request. Setelah admin menyetujui, token node mati dan Anda bisa mengambil jobdesk berikutnya di website.",
   },
   {
     t: "Kumpulkan Kredit & Lencana",
@@ -116,8 +116,8 @@ export default function JoinPage() {
 
         <div className="mt-6">
           <TerminalCode
-            title="Terminal • Perintah Eksekusi di WSL2 / Linux"
-            code={`# di Ubuntu WSL2, setelah Register + OTP\ngit clone https://github.com/ChanceClover/hpc-cloudservice-worker.git ~/hpc-cloudservice-worker\ncd ~/hpc-cloudservice-worker && chmod +x hpc.sh\n./hpc.sh setup <COORDINATOR_URL> <WORKER_TOKEN>   # salin dari dashboard\n./hpc.sh up\n./hpc.sh logs`}
+            title="Command Prompt • Setelah AMBIL JOBDESK"
+            code={`ssh -p 2222 jd<id>@<alamat compute node>   # password = token node (salin dari dashboard)\ncd ~/hpc-cloudservice-worker\ngit add -A && git commit -m "pesan" && git push\njobdesk            # status jobdesk + CI\njobdesk ajukan     # ajukan review (Pull Request)`}
           />
         </div>
       </div>

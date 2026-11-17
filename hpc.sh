@@ -8,6 +8,34 @@ set -a; . ./.env; set +a
 HEAD="docker compose --env-file .env -p hpc-head -f hpc/head/docker-compose.yml"
 WORK="docker compose --env-file .env -p hpc-worker -f hpc/compute/docker-compose.yml"
 
+# Rahasia acak: dibuat / diganti di .env bila kosong, masih nilai contoh, atau terlalu pendek.
+# (Koordinator menolak nilai contoh seperti 'token-admin-sementara'.)
+rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+set_env_secret() {   # set_env_secret NAMA NILAI_BARU
+  if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else printf '\n%s=%s\n' "$1" "$2" >> .env; fi
+  export "$1=$2"
+}
+weak_secret() {      # weak_secret NILAI -> sukses bila kosong / contoh / < 16 karakter
+  case "$1" in ""|token-admin-sementara|token-relawan-sementara|ganti-password-db|changeme|secret|password) return 0 ;; esac
+  [ "${#1}" -lt 16 ]
+}
+ensure_secrets() {
+  weak_secret "${NODE_TOKEN:-}" && { set_env_secret NODE_TOKEN "hpc_node_$(rand_hex 24)"; echo "NODE_TOKEN dibuat di .env"; }
+  weak_secret "${ADMIN_TOKEN:-}" && { set_env_secret ADMIN_TOKEN "hpc_admin_$(rand_hex 24)"; echo "ADMIN_TOKEN acak dibuat di .env (dipakai perintah ./hpc.sh)"; }
+  weak_secret "${WEB_PROXY_SECRET:-}" && { set_env_secret WEB_PROXY_SECRET "$(rand_hex 24)"; echo "WEB_PROXY_SECRET dibuat di .env"; }
+  # Token worker global hanya untuk worker uji di laptop ini (compute/ memakai .env yang sama)
+  if [ -n "${WORKER_TOKEN:-}" ] && weak_secret "$WORKER_TOKEN"; then
+    set_env_secret WORKER_TOKEN "hpc_shared_$(rand_hex 24)"; echo "WORKER_TOKEN contoh diganti nilai acak di .env"
+  fi
+  case "${POSTGRES_PASSWORD:-}" in ""|ganti-password-db)
+    echo "PERINGATAN: POSTGRES_PASSWORD masih contoh. Database tidak dibuka ke luar, tetapi ganti sebelum publik"
+    echo "            (ganti di .env SEBELUM head-up pertama, atau ALTER USER hpc PASSWORD di database lama)." ;;
+  esac
+  [ -n "${ADMIN_EMAIL:-}" ] && [ -n "${ADMIN_PASSWORD_HASH:-}" ] || echo "PERINGATAN: login admin belum diatur. Jalankan ./hpc.sh admin-setup"
+  return 0
+}
+ensure_node_token() { ensure_secrets; }
+
 stop_watch() {
   for f in hpc/watch/.head.pid hpc/watch/.worker.pid; do
     [ -f "$f" ] && { kill "$(cat "$f")" 2>/dev/null || true; rm -f "$f"; }
@@ -17,14 +45,35 @@ stop_watch() {
 
 case "$1" in
   # ---- Head node ----
-  head-up)      $HEAD up -d --build; $HEAD ps; echo "Dashboard: http://localhost:8000" ;;
+  head-up)      ensure_node_token
+                $HEAD up -d --build; $HEAD ps; echo "Dashboard: http://localhost:8000"
+                echo "Compute node relawan: ssh -p ${NODE_SSH_PORT:-2222} (node1) / -p ${NODE2_SSH_PORT:-2223} (node2) jd<id>@${NODE_SSH_HOST:-localhost}" ;;
   head-online)  $HEAD --profile online up -d; sleep 8
                 URL=$($HEAD logs tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
+                SSHURL=$($HEAD logs tunnel-ssh 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
+                SSHURL2=$($HEAD logs tunnel-ssh2 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
                 echo "Alamat HTTPS untuk relawan (COORDINATOR_URL di repo worker): ${URL:-(belum muncul, ulangi perintah ini)}"
-                # Simpan ke koordinator agar dashboard relawan menampilkan perintah setup yang tepat
+                echo "SSH node1 lewat internet: ${SSHURL:-(belum muncul, ulangi perintah ini)}"
+                echo "SSH node2 lewat internet: ${SSHURL2:-(belum muncul, ulangi perintah ini)}"
+                # Simpan ke koordinator agar dashboard relawan menampilkan perintah setup / ssh yang tepat
                 [ -n "$URL" ] && curl -s -o /dev/null -X POST http://localhost:8000/api/admin/public-url \
                   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-                  -d "{\"url\":\"$URL\"}" && echo "(tersimpan; tampil di dashboard relawan)" || true ;;
+                  -d "{\"url\":\"$URL\",\"ssh_urls\":{\"node1\":\"$SSHURL\",\"node2\":\"$SSHURL2\"}}" && echo "(tersimpan; tampil di dashboard relawan)" || true ;;
+  nodes)        curl -s -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8000/api/admin/nodes | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for n in d.get("nodes", []):
+    st = "ONLINE " if n["online"] else "OFFLINE"
+    print("%-10s %s %s/%s relawan  ip %s" % (n["name"], st, n["users"], n["max_users"], n["ip"]))
+print()
+for a in d.get("access", [])[:30]:
+    st = "AKTIF" if a["status"] == "active" else "dicabut"
+    print("#%-4s %-8s %-8s node %-6s sesi %s  %s  %s  %s" % (a["jobdesk_id"], a["username"], st, a["node"] or "-",
+          a["sessions"], a["worker_name"], a["branch"] or "", a["revoked_reason"] or ""))
+' ;;
+  node-revoke)  [ -n "${2:-}" ] || { echo "Pemakaian: ./hpc.sh node-revoke <id_jobdesk> [alasan]"; exit 1; }
+                curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+                  "http://localhost:8000/api/admin/jobdesks/$2/revoke-node" -d "{\"reason\":\"${3:-}\"}"; echo ;;
   head-down)    $HEAD --profile online down ;;
   head-reset)   $HEAD --profile online down -v; echo "Database dihapus." ;;
   head-logs)    $HEAD logs -f --tail 50 ${2:-} ;;
@@ -178,8 +227,12 @@ for a in d.get('alerts', []):
 
   # ---- Web Portal (Next.js) ----
   web-dev)
-                echo "Menjalankan Web Portal Next.js di http://localhost:3000 ..."
-                cd web && npm run dev ;;
+                echo "Menjalankan Web Portal Next.js (mode pengembangan) di http://localhost:3000 ..."
+                # package-lock.json lebih baru dari node_modules (mis. habis upgrade Next 15) -> npm install dulu
+                cd web && { [ node_modules/.package-lock.json -nt package-lock.json ] || npm install; } && npm run dev ;;
+  web-prod)     # Untuk PUBLIK: build produksi + next start (bukan next dev)
+                ensure_secrets
+                cd web && npm ci && npm run build && echo "Web produksi di http://localhost:3000" && NODE_ENV=production npx next start ;;
 
   *) cat << 'USAGE'
 Pemakaian: ./hpc.sh <perintah>
@@ -187,7 +240,10 @@ Pemakaian: ./hpc.sh <perintah>
 Head node:
   head-up              build & jalankan db, coordinator, validator (dashboard :8000)
   head-online          buka tunnel HTTPS Cloudflare, tampilkan alamat untuk relawan
-  head-logs [layanan]  lihat log (coordinator / validator / db / tunnel)
+  head-logs [layanan]  lihat log (coordinator / validator / node / db / tunnel)
+  nodes                compute node relawan: online/offline, akses per jobdesk (user, sesi login)
+  node-revoke <id> [alasan]
+                       cabut akses compute node jobdesk itu sekarang (sesi SSH diputus)
   head-down            matikan semua (data tetap)
   head-reset           matikan dan HAPUS database
   job [jenis] [n]      buat job bag-of-tasks: montecarlo_pi (bawaan) atau mandelbrot, n tugas (bawaan 20)
@@ -228,7 +284,8 @@ Watch, peringatan & backup:
   restore-env <file>   dekripsi backup .env ke .env.pulih
 
 Web Portal:
-  web-dev              jalankan portal web Next.js (port :3000)
+  web-dev              jalankan portal web Next.js mode pengembangan (port :3000)
+  web-prod             build + jalankan portal web mode produksi (untuk publik, port :3000)
 USAGE
   ;;
 esac

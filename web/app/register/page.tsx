@@ -42,17 +42,7 @@ export default function RegisterPage() {
     worker_id: string;
     worker_name: string;
     github_username: string;
-    worker_token: string;
   } | null>(null);
-
-  // Repo worker + alamat koordinator untuk instruksi setelah verifikasi
-  const [project, setProject] = useState<{ repo_url: string | null; coordinator_url: string | null } | null>(null);
-  useEffect(() => {
-    fetch("/api/project", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => setProject(d.project || null))
-      .catch(() => setProject(null));
-  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -71,7 +61,7 @@ export default function RegisterPage() {
       setErrorMsg("Alamat email tidak valid.");
       return;
     }
-    // Password = login WEBSITE (dashboard). Token worker yang terbit setelah OTP = untuk CLI.
+    // Password = satu-satunya cara login WEBSITE (dashboard).
     if (formData.password.length < 8) {
       setErrorMsg("Password minimal 8 karakter (dipakai untuk login website).");
       return;
@@ -165,11 +155,10 @@ export default function RegisterPage() {
         worker_id: data.worker_id,
         worker_name: data.worker_name,
         github_username: data.github_username,
-        worker_token: data.worker_token,
       });
 
       // Langsung login website dengan email + password yang baru dibuat. Server menyimpan
-      // SESI web di cookie httpOnly; token worker tidak pernah masuk cookie (khusus CLI).
+      // SESI web di cookie httpOnly.
       await fetch("/api/volunteer/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -222,7 +211,7 @@ export default function RegisterPage() {
           <p className="mt-2 font-mono text-xs text-zinc-400">
             {step === 1 && "Gerbang validasi reputasi anti-fake memeriksa akun GitHub Anda sebelum memberikan izin akses worker."}
             {step === 2 && `Masukkan 6 digit kode OTP rahasia yang telah dikirim ke ${formData.email}`}
-            {step === 3 && "Token worker Anda telah resmi terverifikasi. Anda siap menjalankan kontainer komputasi."}
+            {step === 3 && "Akun relawan Anda aktif. Ambil jobdesk di dashboard untuk mendapat akses compute node."}
           </p>
         </div>
 
@@ -461,8 +450,8 @@ export default function RegisterPage() {
               </div>
 
               <p className="font-mono text-[10px] leading-relaxed text-zinc-500">
-                Email + password dipakai untuk masuk ke website (dashboard). Setelah OTP, Anda juga mendapat{" "}
-                <span className="text-zinc-300">token worker</span> untuk menjalankan worker dari terminal (CLI).
+                Email + password dipakai untuk masuk ke website (dashboard). Akses compute node (ssh) memakai{" "}
+                <span className="text-zinc-300">token node</span> terpisah yang terbit tiap kali Anda mengambil jobdesk.
               </p>
 
               <button
@@ -482,7 +471,7 @@ export default function RegisterPage() {
             </form>
 
             <div className="mt-6 text-center font-mono text-xs text-zinc-400">
-              Already have an authorized worker token?{" "}
+              Sudah punya akun?{" "}
               <Link href="/login" className="text-cyber-amber-bright hover:underline">
                 Sign in to Dashboard &rarr;
               </Link>
@@ -590,7 +579,7 @@ export default function RegisterPage() {
                   VERIFIKASI BERHASIL • NODE RESMI DIIZINKAN
                 </h3>
                 <p className="font-mono text-xs text-emerald-400">
-                  Status Worker: AKTIF &bull; Siap menerima pembagian tugas komputasi
+                  Status relawan: AKTIF &bull; Login website dengan email + password
                 </p>
               </div>
             </div>
@@ -609,34 +598,20 @@ export default function RegisterPage() {
                 <span className="text-zinc-400">GITHUB USERNAME:</span>
                 <span className="text-emerald-400">@{verifiedWorker.github_username} (Terverifikasi)</span>
               </div>
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-zinc-400">AUTHORIZED WORKER_TOKEN:</span>
-                  <span className="text-[10px] text-zinc-500">RAHASIA</span>
-                </div>
-                <div className="overflow-x-auto rounded bg-cyber-surface p-2 text-cyber-amber-bright border border-cyber-amber/30 select-all font-mono text-[11px]">
-                  {verifiedWorker.worker_token}
-                </div>
-              </div>
             </div>
 
-            {/* Execution instructions */}
+            {/* Langkah berikutnya: jobdesk + compute node */}
             <div className="mt-6">
               <h4 className="font-mono text-xs font-bold text-cyber-amber-bright uppercase tracking-wider">
-                Jalankan Compute Node dari Repo Worker
+                Langkah Berikutnya
               </h4>
-              <p className="mt-1 font-mono text-xs text-zinc-400">
-                Worker dijalankan dari <strong>repo worker</strong> (repo yang juga Anda kerjakan lewat jobdesk), bukan
-                dari repo platform. Jalankan di Ubuntu WSL2 dengan Docker Desktop menyala.
-              </p>
-
-              <TerminalCode
-                title="Terminal • Ubuntu WSL2"
-                code={workerSteps(project?.repo_url, project?.coordinator_url, verifiedWorker.worker_token)}
-              />
-              <p className="mt-1 font-mono text-[10px] text-zinc-500">
-                Lupa token? Lihat atau buat token baru kapan saja di dashboard (kartu &quot;Token Worker untuk CLI&quot;).
-              </p>
+              <ol className="mt-2 list-decimal space-y-1 pl-5 font-mono text-xs text-zinc-400">
+                <li>Buka dashboard, tekan <span className="text-zinc-200">AMBIL JOBDESK</span> (jobdesk terlama di antrean).</li>
+                <li>Kartu jobdesk menampilkan perintah <span className="text-zinc-200">ssh</span> dan <span className="text-zinc-200">token node</span> (password ssh).</li>
+                <li>Login ke compute node dari Command Prompt, kerjakan branch jobdesk, lalu <span className="text-zinc-200">jobdesk ajukan</span>.</li>
+                <li>Setelah admin menyetujui, token node mati; ambil jobdesk berikutnya di website.</li>
+              </ol>
+              <TerminalCode title="Command Prompt / terminal" code={"ssh -p 2222 jd<id>@<alamat compute node>   # password = token node"} />
             </div>
 
             {/* Action buttons */}
@@ -654,23 +629,4 @@ export default function RegisterPage() {
       </div>
     </div>
   );
-}
-
-
-/** Langkah menjalankan worker dari repo worker (sama dengan yang tampil di dashboard). */
-function workerSteps(repoUrl: string | null | undefined, coordUrl: string | null | undefined, token: string) {
-  const repo = (repoUrl || "https://github.com/ChanceClover/hpc-cloudservice-worker").replace(/\/$/, "");
-  const dir = repo.split("/").pop();
-  return [
-    "# 1. Clone repo worker (sekali saja)",
-    `git clone ${repo}.git ~/${dir}`,
-    `cd ~/${dir} && chmod +x hpc.sh`,
-    "",
-    "# 2. Simpan alamat koordinator + token worker Anda ke .env",
-    `./hpc.sh setup ${coordUrl || "<COORDINATOR_URL dari admin>"} ${token}`,
-    "",
-    "# 3. Nyalakan worker, lalu pantau tugasnya",
-    "./hpc.sh up",
-    "./hpc.sh logs",
-  ].join("\n");
 }

@@ -33,7 +33,7 @@ Penjelasan: [docs/WATCH-BACKUP.md](docs/WATCH-BACKUP.md).
 Proyek ini terbagi rapi menjadi dua domain utama: **Frontend Web Portal** (`web/`) dan **Sistem Klaster HPC** (`hpc/`):
 
 ```
-├── web/                     # PORTAL WEBSITE (Next.js 14, Tailwind CSS, TypeScript)
+├── web/                     # PORTAL WEBSITE (Next.js 15, Tailwind CSS, TypeScript)
 │   ├── app/                 # Halaman: /overview, /join, /register, /dashboard, /appreciation, /admin
 │   ├── components/          # Komponen UI (CyberNavbar, CyberFooter, TerminalCode, dll.)
 │   └── lib/                 # Helper API klien & integrasi ke koordinator backend

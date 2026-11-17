@@ -1,0 +1,32 @@
+# sshd compute node relawan: hanya user grup 'relawan' (jd<id>), password = token node (hpc_ng_...) dari website.
+Port 22
+HostKey /var/lib/hpc-node/ssh/ssh_host_ed25519_key
+HostKey /var/lib/hpc-node/ssh/ssh_host_ecdsa_key
+HostKey /var/lib/hpc-node/ssh/ssh_host_rsa_key
+PermitRootLogin no
+AllowGroups relawan
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+# Hanya token node: kunci SSH dimatikan agar token yang diganti / dicabut benar-benar menutup akses
+# (tanpa ini relawan / pencuri token bisa menanam ~/.ssh/authorized_keys sebagai pintu belakang)
+PubkeyAuthentication no
+AuthorizedKeysFile none
+PermitEmptyPasswords no
+UsePAM yes
+MaxAuthTries 3
+LoginGraceTime 30
+# Batasi koneksi yang belum login (tebak password massal)
+MaxStartups 10:30:60
+MaxSessions 4
+# Tidak ada terowongan dari node ke jaringan internal platform
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+PermitTunnel no
+X11Forwarding no
+PermitUserEnvironment no
+ClientAliveInterval 30
+ClientAliveCountMax 4
+PrintMotd no
+Subsystem sftp internal-sftp

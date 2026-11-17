@@ -1,35 +1,38 @@
 """
-Login web relawan (email + password) dan pemisahannya dari token worker (CLI).
+Login web relawan: HANYA email + password.
 
-Dua kredensial, dua kegunaan:
-  - WORKER_TOKEN (hpc_w_...)  -> dipakai MESIN: kontainer worker mengirimnya sebagai
-    Authorization: Bearer di setiap /api/register, /api/tasks/claim, /api/heartbeat,
-    /api/tasks/submit. Disimpan di file .env repo worker. Tidak pernah dipakai browser.
-  - Email + password          -> dipakai MANUSIA di website. Login membuat SESI web
-    (hpc_ws_...), yang disimpan browser di cookie httpOnly dan hanya bisa membuka
-    endpoint dashboard (/api/me, jobdesk, sertifikat, apresiasi), BUKAN mengambil tugas.
+Kredensial dipisah menurut pemakainya:
+  - Email + password  -> MANUSIA di website. Login membuat SESI web (hpc_ws_...), disimpan
+    browser di cookie httpOnly, hanya untuk endpoint dashboard (/api/me, jobdesk, sertifikat).
+  - Token node (hpc_ng_...) -> ssh + git di compute node, satu per jobdesk (node_access.py).
+  - Token worker (hpc_w_...) -> MESIN worker CPU (pengujian), diatur admin lewat ./hpc.sh / .env.
+    Tidak ditampilkan dan tidak bisa dipakai di website.
 
 Tabel worker_sessions hanya menyimpan hash SHA-256 token sesi (lihat schema.py).
+Akun lama tanpa password: atur password lewat kode OTP email (password_reset).
 
 Endpoint:
-  POST /api/auth/login            {email, password} atau {token} (sekali, untuk akun lama tanpa password)
-  POST /api/auth/logout           hapus sesi web
-  GET  /api/auth/session          identitas pemilik sesi (untuk navbar)
-  POST /api/me/password           buat / ganti password (butuh sesi web)
-  GET  /api/me/cli-token          tampilkan token worker untuk CLI (butuh sesi web)
-  POST /api/me/cli-token/rotate   terbitkan token worker baru, token lama langsung tidak berlaku
+  POST /api/auth/login                {email, password}
+  POST /api/auth/logout               hapus sesi web
+  GET  /api/auth/session              identitas pemilik sesi (untuk navbar)
+  POST /api/auth/password/request     {email} -> kirim kode OTP atur ulang password ke email
+  POST /api/auth/password/reset       {email, otp, password} -> password baru, semua sesi lama keluar
+  POST /api/me/password               buat / ganti password (butuh sesi web)
+  POST /api/me/profile                ubah profil (nama, username, ...; butuh sesi web)
 """
 import os
 import secrets
+import hashlib
+import hmac
 import time
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from admin_auth import DUMMY_HASH, hash_password, hash_token, verify_password
-from common import db, check_worker_auth
+from common import db, client_ip
+from email_service import generate_otp, send_email
 
 SESSION_DAYS = float(os.environ.get("WORKER_SESSION_DAYS", "7") or 7)
 MIN_PASSWORD_LEN = 8
@@ -96,20 +99,16 @@ def worker_from_session(auth: str | None) -> dict | None:
     return w
 
 
-def check_volunteer_auth(auth: str | None, web_only: bool = False) -> dict:
+def check_volunteer_auth(auth: str | None, web_only: bool = True) -> dict:
     """
-    Autentikasi endpoint dashboard relawan. Menerima sesi web (hpc_ws_...) dan, kecuali
-    web_only, juga token worker pribadi (hpc_w_...) agar skrip CLI lama tetap jalan.
-    Mengembalikan {"type": "individual", "worker": {...}, "via": "web" | "cli"}.
+    Autentikasi endpoint dashboard relawan: hanya sesi web (hpc_ws_...). Token worker
+    (hpc_w_...) tidak lagi diterima di website. Argumen web_only dipertahankan agar
+    pemanggil lama tetap jalan. Mengembalikan {"type": "individual", "worker": {...}, "via": "web"}.
     """
     w = worker_from_session(auth)
     if w:
         return {"type": "individual", "worker": w, "via": "web"}
-    if web_only:
-        raise HTTPException(401, "Butuh login website (email + password).")
-    info = check_worker_auth(auth)
-    info["via"] = "cli"
-    return info
+    raise HTTPException(401, "Butuh login website (email + password).")
 
 
 def _new_session(c, worker_id: str, request: Request, user_agent: str | None) -> tuple[str, datetime]:
@@ -118,58 +117,46 @@ def _new_session(c, worker_id: str, request: Request, user_agent: str | None) ->
     c.execute("DELETE FROM worker_sessions WHERE expires_at < now()")
     c.execute("""INSERT INTO worker_sessions (token_hash, worker_id, expires_at, ip, user_agent)
                  VALUES (%s, %s, %s, %s, %s)""",
-              (hash_token(token), worker_id, expires,
-               request.client.host if request.client else None, (user_agent or "")[:200]))
+              (hash_token(token), worker_id, expires, client_ip(request), (user_agent or "")[:200]))
     return token, expires
 
 
 class LoginBody(BaseModel):
     email: str | None = None
     password: str | None = None
-    token: str | None = None   # hanya untuk akun lama yang belum punya password
 
 
 @router.post("/api/auth/login")
 def volunteer_login(body: LoginBody, request: Request, user_agent: str = Header(None)):
-    ip = request.client.host if request.client else "?"
-    if body.token:
-        # Akun yang dibuat lewat './hpc.sh worker-login' belum punya password:
-        # masuk sekali dengan token worker, lalu buat password di dashboard.
-        info = check_worker_auth(f"Bearer {body.token.strip()}")
-        if info["type"] != "individual":
-            raise HTTPException(401, "Token bersama (WORKER_TOKEN contoh) tidak punya akun relawan.")
-        w = info["worker"]
-    else:
-        email = (body.email or "").strip().lower()
-        password = body.password or ""
-        if not email or not password:
-            raise HTTPException(400, "Email dan password wajib diisi.")
-        keys = [f"email:{email}", f"ip:{ip}"]
-        if any(_locked(k) for k in keys):
-            raise HTTPException(429, "Terlalu banyak percobaan login gagal. Coba lagi 15 menit lagi.")
-        with db() as c:
-            rows = c.execute("""SELECT id, name, github_username, email, status, password_hash
-                                  FROM workers WHERE lower(email) = %s AND password_hash IS NOT NULL
-                                 ORDER BY created_at""", (email,)).fetchall()
-        w = next((r for r in rows if verify_password(password, r["password_hash"])), None)
-        if not rows:
-            verify_password(password, DUMMY_HASH)  # waktu respons sama walau email tidak ada
-        if not w:
-            for k in keys:
-                _record_fail(k)
-            raise HTTPException(401, "Email atau password salah. Akun dari './hpc.sh worker-login' "
-                                     "yang belum punya password: pilih 'Masuk dengan token worker'.")
+    ip = client_ip(request)
+    email = (body.email or "").strip().lower()
+    password = body.password or ""
+    if not email or not password:
+        raise HTTPException(400, "Email dan password wajib diisi.")
+    keys = [f"email:{email}", f"ip:{ip}"]
+    if any(_locked(k) for k in keys):
+        raise HTTPException(429, "Terlalu banyak percobaan login gagal. Coba lagi 15 menit lagi.")
+    with db() as c:
+        rows = c.execute("""SELECT id, name, github_username, email, status, password_hash
+                              FROM workers WHERE lower(email) = %s AND password_hash IS NOT NULL
+                             ORDER BY created_at""", (email,)).fetchall()
+    w = next((r for r in rows if verify_password(password, r["password_hash"])), None)
+    if not rows:
+        verify_password(password, DUMMY_HASH)  # waktu respons sama walau email tidak ada
+    if not w:
         for k in keys:
-            _fails.pop(k, None)
-        if w["status"] != "active":
-            raise HTTPException(403, f"Akun relawan '{w['name']}' ditangguhkan admin ({w['status']}).")
+            _record_fail(k)
+        raise HTTPException(401, "Email atau password salah. Belum punya password / lupa? "
+                                 "Pilih 'Lupa / belum punya password?' untuk kode OTP lewat email.")
+    for k in keys:
+        _fails.pop(k, None)
+    if w["status"] != "active":
+        raise HTTPException(403, f"Akun relawan '{w['name']}' ditangguhkan admin ({w['status']}).")
     with db() as c:
         token, expires = _new_session(c, w["id"], request, user_agent)
-        has_pw = c.execute("SELECT password_hash IS NOT NULL AS x FROM workers WHERE id = %s",
-                           (w["id"],)).fetchone()["x"]
     print(f"[RELAWAN] Login web: {w['name']} (@{w['github_username']}) dari {ip}", flush=True)
     return {"session": token, "expires_at": expires.isoformat(), "worker_name": w["name"],
-            "github_username": w["github_username"], "has_password": has_pw}
+            "github_username": w["github_username"], "has_password": True}
 
 
 @router.post("/api/auth/logout")
@@ -221,7 +208,7 @@ class ProfileUpdateBody(BaseModel):
 
 @router.post("/api/me/profile")
 def update_profile(body: ProfileUpdateBody, authorization: str = Header(None)):
-    w = check_volunteer_auth(authorization, web_only=False)["worker"]
+    w = check_volunteer_auth(authorization)["worker"]
     with db() as c:
         updates = []
         params = []
@@ -243,33 +230,104 @@ def update_profile(body: ProfileUpdateBody, authorization: str = Header(None)):
             updates.append("name = %s")
             params.append(wn)
 
-        if body.email is not None and body.email.strip():
-            updates.append("email = %s")
-            params.append(body.email.strip()[:100])
-        if body.github_username is not None and body.github_username.strip():
-            updates.append("github_username = %s")
-            params.append(body.github_username.strip().lstrip("@")[:60])
+        # Email dan username GitHub sudah DIVERIFIKASI saat daftar (OTP email + cek akun GitHub),
+        # jadi tidak bisa diganti dari profil. Mengganti keduanya = daftar ulang lewat halaman Register
+        # (verifikasi GitHub + OTP lagi) atau lewat admin.
+        cur = c.execute("SELECT email, github_username FROM workers WHERE id = %s", (w["id"],)).fetchone()
+        if body.email is not None and body.email.strip().lower() != (cur["email"] or "").strip().lower():
+            raise HTTPException(400, "Email tidak bisa diganti dari profil (sudah diverifikasi OTP). "
+                                     "Daftar ulang lewat halaman Register atau hubungi admin.")
+        gh = (body.github_username or "").strip().lstrip("@")
+        if body.github_username is not None and gh.lower() != (cur["github_username"] or "").lower():
+            raise HTTPException(400, "Username GitHub tidak bisa diganti dari profil (sudah diverifikasi). "
+                                     "Daftar ulang lewat halaman Register dengan akun GitHub baru.")
         if updates:
             params.append(w["id"])
             c.execute(f"UPDATE workers SET {', '.join(updates)} WHERE id = %s", tuple(params))
     return {"ok": True, "message": "Profil berhasil diperbarui."}
 
 
-@router.get("/api/me/cli-token")
-def get_cli_token(authorization: str = Header(None)):
-    """Token worker untuk file .env repo worker. Hanya lewat sesi web (bukan token itu sendiri)."""
-    w = check_volunteer_auth(authorization, web_only=True)["worker"]
-    with db() as c:
-        r = c.execute("SELECT auth_token FROM workers WHERE id = %s", (w["id"],)).fetchone()
-    return {"worker_id": w["id"], "worker_token": r["auth_token"]}
+# ---------------------------------------------------------------------------- atur ulang password
+
+RESET_MINUTES = 10
+RESET_MAX_ATTEMPTS = 5
+RESET_COOLDOWN_S = 60
 
 
-@router.post("/api/me/cli-token/rotate")
-def rotate_cli_token(authorization: str = Header(None)):
-    """Token baru (mis. token lama bocor / dicabut admin). Worker yang memakai token lama berhenti."""
-    w = check_volunteer_auth(authorization, web_only=True)["worker"]
-    token = f"hpc_w_{uuid.uuid4().hex}"
+def _otp_hash(email: str, otp: str) -> str:
+    return hashlib.sha256(f"{email}:{otp}".encode()).hexdigest()
+
+
+class ResetRequestBody(BaseModel):
+    email: str
+
+
+@router.post("/api/auth/password/request")
+def password_reset_request(body: ResetRequestBody, request: Request):
+    """
+    Kirim kode OTP ke email akun relawan (akun lama tanpa password / lupa password).
+    Jawaban selalu sama, ada atau tidak akunnya, agar email terdaftar tidak bisa ditebak.
+    Kode TIDAK pernah dikirim ke browser; di mode dev email, kode hanya tampil di log koordinator.
+    """
+    email = (body.email or "").strip().lower()
+    generic = {"ok": True, "message": f"Bila {email or 'email itu'} terdaftar, kode OTP sudah dikirim "
+                                      f"(berlaku {RESET_MINUTES} menit)."}
+    ip = client_ip(request)
+    if not email or "@" not in email or len(email) > 200:
+        raise HTTPException(400, "Email tidak valid.")
+    # Batas per EMAIL (bukan per IP: lewat website semua permintaan datang dari IP server web)
+    key = f"reset:{email}"
+    recent = [t for t in _fails.get(key, []) if time.time() - t < LOCK_SECONDS]
+    if len(recent) >= 5:
+        raise HTTPException(429, "Terlalu banyak permintaan kode untuk email ini. Coba lagi 15 menit lagi.")
+    _record_fail(key)
     with db() as c:
-        c.execute("UPDATE workers SET auth_token = %s WHERE id = %s", (token, w["id"]))
-    print(f"[RELAWAN] Token worker baru untuk {w['name']} (@{w['github_username']})", flush=True)
-    return {"worker_id": w["id"], "worker_token": token}
+        w = c.execute("""SELECT id, name, email, status FROM workers WHERE lower(email) = %s
+                          ORDER BY created_at DESC LIMIT 1""", (email,)).fetchone()
+        if not w or w["status"] != "active":
+            return generic
+        last = c.execute("""SELECT extract(epoch FROM now() - created_at) AS age FROM worker_password_resets
+                             WHERE email = %s""", (email,)).fetchone()
+        if last and last["age"] < RESET_COOLDOWN_S:
+            return generic   # kode sebelumnya masih baru: tidak dikirim ulang (jawaban tetap sama)
+        otp = generate_otp(6)
+        c.execute("""INSERT INTO worker_password_resets (email, worker_id, otp_hash, expires_at, attempts, created_at)
+                     VALUES (%s, %s, %s, now() + make_interval(mins => %s), 0, now())
+                     ON CONFLICT (email) DO UPDATE SET worker_id = EXCLUDED.worker_id, otp_hash = EXCLUDED.otp_hash,
+                         expires_at = EXCLUDED.expires_at, attempts = 0, created_at = now()""",
+                  (email, w["id"], _otp_hash(email, otp), RESET_MINUTES))
+    res = send_email(w["email"], "Kode atur password HPC Cloud Service",
+                     f"Halo {w['name']},\n\nKode untuk mengatur password website HPC Cloud Service: {otp}\n"
+                     f"Berlaku {RESET_MINUTES} menit. Abaikan email ini bila Anda tidak memintanya.\n")
+    if res.get("status") not in ("sent", "dev"):
+        print(f"[RELAWAN] Kirim OTP atur password ke {email} gagal: {res}", flush=True)
+    print(f"[RELAWAN] Kode atur password diminta untuk {w['name']} ({email}) dari {ip}", flush=True)
+    return generic
+
+
+class ResetBody(BaseModel):
+    email: str
+    otp: str
+    password: str
+
+
+@router.post("/api/auth/password/reset")
+def password_reset(body: ResetBody):
+    email = (body.email or "").strip().lower()
+    otp = (body.otp or "").strip()
+    check_password_rule(body.password)
+    with db() as c:
+        r = c.execute("""SELECT worker_id, otp_hash, attempts, expires_at > now() AS valid
+                           FROM worker_password_resets WHERE email = %s FOR UPDATE""", (email,)).fetchone()
+        if not r or not r["valid"] or r["attempts"] >= RESET_MAX_ATTEMPTS:
+            raise HTTPException(400, "Kode OTP tidak berlaku (kedaluwarsa / terlalu banyak salah). Minta kode baru.")
+        if not hmac.compare_digest(r["otp_hash"], _otp_hash(email, otp)):
+            c.execute("UPDATE worker_password_resets SET attempts = attempts + 1 WHERE email = %s", (email,))
+            raise HTTPException(400, f"Kode OTP salah. Sisa percobaan: {max(0, RESET_MAX_ATTEMPTS - r['attempts'] - 1)}")
+        c.execute("UPDATE workers SET password_hash = %s WHERE id = %s",
+                  (hash_password(body.password), r["worker_id"]))
+        c.execute("DELETE FROM worker_sessions WHERE worker_id = %s", (r["worker_id"],))   # sesi lama keluar
+        c.execute("DELETE FROM worker_password_resets WHERE email = %s", (email,))
+    _fails.pop(f"email:{email}", None)
+    print(f"[RELAWAN] Password website diatur ulang lewat OTP: {email}", flush=True)
+    return {"ok": True, "message": "Password tersimpan. Silakan login dengan email + password baru."}

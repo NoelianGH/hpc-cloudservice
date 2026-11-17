@@ -1,29 +1,51 @@
 import hmac
 import re
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from psycopg.types.json import Jsonb
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from github_verifier import check_github_worker
 from email_service import generate_otp, send_otp_email
 from admin import router as admin_router, get_admin_session
-from common import db, check_worker_auth, check_worker_owner
+from common import db, check_worker_auth, check_worker_owner, client_ip, strong_secret
 from schema import migrate
 from jobs import JobError, canonical_hash, create_job, heatmap_png
 from volunteer import router as volunteer_router
 from volunteer_auth import router as volunteer_auth_router, check_password_rule
 from admin_auth import hash_password
 from project import router as project_router
+from node_access import router as node_router
 from watch import router as watch_router
 
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")  # token lama untuk CLI (./hpc.sh job)
+ADMIN_TOKEN = strong_secret("ADMIN_TOKEN")  # token lama untuk CLI (./hpc.sh job)
 LEASE_SECONDS = 30
 OTP_EXPIRY_MINUTES = 10
+# Kode OTP pendaftaran hanya dikembalikan ke browser bila DEV_SHOW_OTP=1 (uji lokal tanpa email).
+# Di server publik JANGAN dinyalakan: siapa pun bisa mendaftar memakai email orang lain.
+DEV_SHOW_OTP = os.environ.get("DEV_SHOW_OTP", "0").strip() == "1"
+# Batas permintaan OTP pendaftaran (cegah spam email & habisnya kuota GitHub API)
+REG_MAX_PER_EMAIL, REG_MAX_PER_IP, REG_WINDOW_S = 3, 10, 15 * 60
+RESEND_MAX, RESEND_COOLDOWN_S = 5, 60
+_reg_hits: dict[str, list[float]] = {}
+
+
+def _reg_limited(key: str, limit: int) -> bool:
+    now = time.time()
+    hits = [t for t in _reg_hits.get(key, []) if now - t < REG_WINDOW_S]
+    if len(_reg_hits) > 10_000:
+        _reg_hits.clear()
+    if len(hits) >= limit:
+        _reg_hits[key] = hits
+        return True
+    hits.append(now)
+    _reg_hits[key] = hits
+    return False
 MAX_RESULT_BYTES = 2_000_000  # batas ukuran hasil satu tugas
 
 def init_db_schema():
@@ -43,11 +65,29 @@ async def lifespan(app: FastAPI):
     init_db_schema()
     yield
 
-app = FastAPI(title="HPC Coordinator", lifespan=lifespan)
+# Dokumentasi API otomatis (/docs, /redoc, /openapi.json) memetakan semua endpoint: hanya untuk
+# pengembangan (API_DOCS=1), mati bila koordinator dibuka ke internet.
+_DOCS = os.environ.get("API_DOCS", "0").strip() == "1"
+app = FastAPI(title="HPC Coordinator", lifespan=lifespan, docs_url="/docs" if _DOCS else None,
+              redoc_url="/redoc" if _DOCS else None, openapi_url="/openapi.json" if _DOCS else None)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Referrer-Policy", "no-referrer")
+    p = request.url.path
+    if p.startswith(("/api/auth", "/api/me", "/api/admin", "/api/node")):
+        h["Cache-Control"] = "no-store"   # jawaban berisi sesi / token: jangan disimpan cache / proxy
+    return resp
 app.include_router(admin_router)
 app.include_router(volunteer_router)
 app.include_router(volunteer_auth_router)
 app.include_router(project_router)
+app.include_router(node_router)
 app.include_router(watch_router)
 
 def check_admin(auth: str | None):
@@ -83,7 +123,7 @@ class AuthVerifyRequest(BaseModel):
     otp: str
 
 @app.post("/api/auth/register-request")
-def auth_register_request(body: AuthRegisterRequest):
+def auth_register_request(body: AuthRegisterRequest, request: Request):
     """
     Langkah 1 Autentikasi CLI:
     Worker mengirimkan worker_name, github_username, dan email.
@@ -109,13 +149,23 @@ def auth_register_request(body: AuthRegisterRequest):
     if body.password:
         check_password_rule(body.password)
         password_hash = hash_password(body.password)
+    if _reg_limited(f"ip:{client_ip(request)}", REG_MAX_PER_IP) or _reg_limited(f"email:{email.lower()}", REG_MAX_PER_EMAIL):
+        raise HTTPException(429, "Terlalu banyak permintaan pendaftaran. Coba lagi 15 menit lagi.")
     # Satu email = satu akun relawan (email dipakai untuk login website)
     with db() as c:
         taken = c.execute("""SELECT 1 FROM workers WHERE lower(email) = lower(%s)
                                AND lower(coalesce(github_username, '')) <> lower(%s) LIMIT 1""",
                           (email, github_user)).fetchone()
+        # Akun GitHub yang SUDAH terdaftar hanya bisa didaftar ulang dengan email yang sama. Tanpa ini,
+        # siapa pun bisa mengetik username GitHub orang lain + emailnya sendiri, lolos OTP, lalu
+        # mengambil alih akun itu (email, password, kredit, jobdesk, akses compute node).
+        owner = c.execute("""SELECT email FROM workers WHERE lower(github_username) = lower(%s) LIMIT 1""",
+                          (github_user,)).fetchone()
     if taken:
         raise HTTPException(400, "Email ini sudah dipakai akun relawan lain. Gunakan email lain atau login.")
+    if owner and (owner["email"] or "").strip().lower() != email.lower():
+        raise HTTPException(400, "Akun GitHub ini sudah terdaftar dengan email lain. Login dengan email itu, "
+                                 "atau pilih 'Lupa / belum punya password?' di halaman login.")
 
     # 1. Pengecekan Reputasi GitHub (Anti-Fake Worker)
     gh_check = check_github_worker(github_user)
@@ -184,8 +234,8 @@ def auth_register_request(body: AuthRegisterRequest):
         "message": f"Akun GitHub lolos verifikasi. Kode OTP telah dikirimkan ke {email}.",
     }
 
-    # Jika sedang dalam dev mode / simulasi email, sertakan info dev_otp agar mudah diuji
-    if mail_result.get("dev_mode") and "dev_otp" in mail_result:
+    # Mode dev (tanpa layanan email): kode OTP ada di log koordinator; ke browser hanya bila DEV_SHOW_OTP=1
+    if mail_result.get("dev_mode") and "dev_otp" in mail_result and DEV_SHOW_OTP:
         response_data["dev_mode"] = True
         response_data["dev_otp"] = mail_result["dev_otp"]
 
@@ -235,8 +285,12 @@ def auth_verify_otp(body: AuthVerifyRequest):
 
         # Periksa apakah worker dengan github_username yang sama sudah pernah ada
         existing_worker = c.execute("""
-            SELECT id FROM workers WHERE github_username = %s LIMIT 1
+            SELECT id, email FROM workers WHERE lower(github_username) = lower(%s) LIMIT 1
         """, (session["github_username"],)).fetchone()
+        # Cek ulang (sesi bisa dibuat sebelum akun itu ada): akun GitHub terdaftar hanya boleh
+        # diperbarui oleh pemilik email yang sama, jangan sampai email/password akun lain tertimpa.
+        if existing_worker and (existing_worker["email"] or "").strip().lower() != session["email"].strip().lower():
+            raise HTTPException(400, "Akun GitHub ini sudah terdaftar dengan email lain. Login dengan email itu.")
 
         worker_token = f"hpc_w_{uuid.uuid4().hex}"
 
@@ -454,6 +508,11 @@ def auth_resend_otp(body: AuthResendBody):
             raise HTTPException(404, "Sesi autentikasi tidak ditemukan.")
         if session["verified"]:
             raise HTTPException(400, "Sesi ini sudah terverifikasi, tidak bisa resend.")
+        if (session.get("resends") or 0) >= RESEND_MAX:
+            raise HTTPException(429, "Batas kirim ulang OTP tercapai. Mulai pendaftaran dari awal.")
+        last = session.get("last_sent_at") or session.get("created_at")
+        if last and (datetime.now(timezone.utc) - last).total_seconds() < RESEND_COOLDOWN_S:
+            raise HTTPException(429, f"Tunggu {RESEND_COOLDOWN_S} detik sebelum minta kode baru.")
 
         # Generate OTP baru dan reset hitungan percobaan
         new_otp     = generate_otp(6)
@@ -461,7 +520,8 @@ def auth_resend_otp(body: AuthResendBody):
 
         c.execute("""
             UPDATE worker_auth_sessions
-               SET otp = %s, otp_expires_at = %s, attempts = 0
+               SET otp = %s, otp_expires_at = %s, attempts = 0,
+                   resends = coalesce(resends, 0) + 1, last_sent_at = now()
              WHERE session_id = %s
         """, (new_otp, new_expires, session_id))
 
@@ -477,7 +537,7 @@ def auth_resend_otp(body: AuthResendBody):
         "session_id": session_id,
         "message":    f"Kode OTP baru telah dikirimkan ke {session['email']}.",
     }
-    if mail_result.get("dev_mode") and "dev_otp" in mail_result:
+    if mail_result.get("dev_mode") and "dev_otp" in mail_result and DEV_SHOW_OTP:
         response["dev_mode"] = True
         response["dev_otp"]  = mail_result["dev_otp"]
     return response

@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   if (!sameOrigin(req)) {
     return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
   }
-  const token = cookies().get(WORKER_COOKIE)?.value;
+  const token = (await cookies()).get(WORKER_COOKIE)?.value;
   if (!token) return NextResponse.json({ detail: "Belum login." }, { status: 401 });
   const { status, data } = await coordinatorFetch("/api/me/certificate", { method: "POST", token });
   return NextResponse.json(data, { status });

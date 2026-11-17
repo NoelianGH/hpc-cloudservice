@@ -4,8 +4,8 @@
  * Website  : relawan login dengan EMAIL + PASSWORD. Koordinator membuat sesi web (hpc_ws_...)
  *            yang disimpan di cookie httpOnly ini (tidak bisa dibaca JavaScript), lalu diteruskan
  *            ke koordinator sebagai Authorization: Bearer pada setiap request dashboard.
- * CLI/worker: memakai WORKER_TOKEN (hpc_w_...) di file .env repo worker. Token itu TIDAK pernah
- *            disimpan di cookie; dashboard hanya menampilkannya saat diminta (tombol "Tampilkan").
+ * Token lain tidak dipakai di website: token node (hpc_ng_..., ssh + git per jobdesk) hanya
+ *            ditampilkan di kartu jobdesk; token worker CPU (hpc_w_...) diatur admin lewat ./hpc.sh.
  */
 import type { NextResponse } from "next/server";
 import { isHttps } from "@/lib/admin";

@@ -60,6 +60,10 @@ services:
       PUBLIC_COORDINATOR_URL: ${PUBLIC_COORDINATOR_URL:-}
       # Login website relawan (email + password): umur sesi web (hari)
       WORKER_SESSION_DAYS: ${WORKER_SESSION_DAYS:-7}
+      # Keamanan: rahasia web<->koordinator (IP asli pengunjung), OTP ke browser (uji lokal), /docs API
+      WEB_PROXY_SECRET: ${WEB_PROXY_SECRET:-}
+      DEV_SHOW_OTP: ${DEV_SHOW_OTP:-0}
+      API_DOCS: ${API_DOCS:-0}
       REQUIRE_CI_PASS: ${REQUIRE_CI_PASS:-1}
       CI_REPLICAS: ${CI_REPLICAS:-2}
       CI_TIMEOUT_S: ${CI_TIMEOUT_S:-300}
@@ -70,8 +74,18 @@ services:
       ALERT_EMAIL_COOLDOWN_MIN: ${ALERT_EMAIL_COOLDOWN_MIN:-15}
       WATCH_MISMATCH_LIMIT: ${WATCH_MISMATCH_LIMIT:-3}
       BACKUP_MAX_AGE_MIN: ${BACKUP_MAX_AGE_MIN:-130}
+      # Akses relawan ke compute node per jobdesk (ssh + gerbang git, lihat node_access.py)
+      NODE_ACCESS: ${NODE_ACCESS:-1}
+      NODE_TOKEN: ${NODE_TOKEN:-}
+      NODE_SSH_HOST: ${NODE_SSH_HOST:-localhost}
+      NODE_SSH_PORT: ${NODE_SSH_PORT:-2222}
+      NODE_MAX_USERS: ${NODE_MAX_USERS:-3}
+      NODE_TOKEN_TTL_DAYS: ${NODE_TOKEN_TTL_DAYS:-7}
+      NODE_READ_MAIN: ${NODE_READ_MAIN:-1}
+      JOBDESK_AUTO_ASSIGN: ${JOBDESK_AUTO_ASSIGN:-0}
     ports:
       - "8000:8000"
+    networks: [default, nodes]
     depends_on:
       db:
         condition: service_healthy
@@ -84,6 +98,54 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # Compute node untuk relawan-developer (disediakan platform). Relawan login dari command prompt:
+  #   ssh -p 2222 jd<id>@<alamat-head>   (node1)      ssh -p 2223 jd<id>@<alamat-head>   (node2)
+  # Akses baru ditempatkan di node paling longgar secara bergiliran, maks NODE_MAX_USERS per node.
+  # Node hanya terhubung ke koordinator (jaringan 'nodes'), tidak ke database. User per jobdesk dibuat /
+  # dihapus oleh agen di dalamnya; push repo B hanya lewat gerbang git koordinator.
+  # Tambah node: salin blok node2 (nama, hostname, NODE_NAME, port, volume berbeda).
+  node: &node
+    build: ./node
+    image: hpc-head-node
+    restart: unless-stopped
+    hostname: node1
+    environment:
+      COORDINATOR_URL: http://coordinator:8000
+      NODE_TOKEN: ${NODE_TOKEN:-}
+      NODE_NAME: node1
+      NODE_MAX_USERS: ${NODE_MAX_USERS:-3}
+      NODE_SSH_PUBLIC_PORT: ${NODE_SSH_PORT:-2222}
+    ports:
+      - "${NODE_SSH_PORT:-2222}:22"
+    networks: [nodes]
+    volumes:
+      - nodehome:/home              # pekerjaan relawan tetap ada walau kontainer dibuat ulang
+      - nodekeys:/var/lib/hpc-node  # kunci host SSH tetap sama
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL, SYS_CHROOT, AUDIT_WRITE, NET_BIND_SERVICE]
+    # Program setuid (su, passwd, ...) tidak bisa menaikkan hak akses relawan
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 1024
+    mem_limit: ${NODE_MEMORY:-2g}
+    cpus: ${NODE_CPUS:-1}
+    depends_on:
+      - coordinator
+
+  node2:
+    <<: *node
+    hostname: node2
+    environment:
+      COORDINATOR_URL: http://coordinator:8000
+      NODE_TOKEN: ${NODE_TOKEN:-}
+      NODE_NAME: node2
+      NODE_MAX_USERS: ${NODE_MAX_USERS:-3}
+      NODE_SSH_PUBLIC_PORT: ${NODE2_SSH_PORT:-2223}
+    ports:
+      - "${NODE2_SSH_PORT:-2223}:22"
+    volumes:
+      - node2home:/home
+      - node2keys:/var/lib/hpc-node
 
   # Backup database otomatis tiap jam ke folder backup/ (lihat backup/backup.sh)
   backup:
@@ -116,5 +178,33 @@ services:
     depends_on:
       - coordinator
 
+  # SSH compute node lewat internet (relawan di jaringan lain). Relawan butuh cloudflared:
+  #   ssh -o ProxyCommand="cloudflared access ssh --hostname %h" jd12@<alamat>.trycloudflare.com
+  tunnel-ssh:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url ssh://node:22
+    profiles: ["online"]
+    networks: [nodes]
+    depends_on:
+      - node
+
+  tunnel-ssh2:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url ssh://node2:22
+    profiles: ["online"]
+    networks: [nodes]
+    depends_on:
+      - node2
+
+networks:
+  default:
+  nodes:
+
 volumes:
   dbdata:
+  nodehome:
+  nodekeys:
+  node2home:
+  node2keys:

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /** Profil relawan yang sedang login: kredit, peringkat, lencana, progres sertifikat, riwayat tugas. */
 export async function GET() {
-  const session = cookies().get(WORKER_COOKIE)?.value;
+  const session = (await cookies()).get(WORKER_COOKIE)?.value;
   if (!session) return NextResponse.json({ detail: "Belum login." }, { status: 401 });
 
   const { status, data } = await coordinatorFetch("/api/me", { token: session });

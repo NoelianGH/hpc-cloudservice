@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { coordinatorFetch } from "@/lib/admin";
+import { coordinatorFetch, sameOrigin } from "@/lib/admin";
 import { WORKER_COOKIE } from "@/lib/volunteer";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const token = cookies().get(WORKER_COOKIE)?.value;
+  if (!sameOrigin(req)) return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
+  const token = (await cookies()).get(WORKER_COOKIE)?.value;
   if (!token) {
     return NextResponse.json({ detail: "Sesi relawan tidak ditemukan atau sudah berakhir." }, { status: 401 });
   }

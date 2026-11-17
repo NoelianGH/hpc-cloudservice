@@ -151,6 +151,9 @@ STATEMENTS = [
     "ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_name TEXT",
     "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS first_name TEXT",
     "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS last_name TEXT",
+    # Batas kirim ulang OTP pendaftaran (lihat app.py: RESEND_MAX, RESEND_COOLDOWN_S)
+    "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS resends INT NOT NULL DEFAULT 0",
+    "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS last_sent_at TIMESTAMPTZ",
     # Sesi web relawan: hanya HASH token sesi yang disimpan; token worker (CLI) tidak pernah ke browser.
     """CREATE TABLE IF NOT EXISTS worker_sessions (
         token_hash   TEXT PRIMARY KEY,
@@ -161,11 +164,52 @@ STATEMENTS = [
         ip           TEXT,
         user_agent   TEXT)""",
     "CREATE INDEX IF NOT EXISTS idx_worker_sessions_worker ON worker_sessions (worker_id)",
+    # Atur ulang / buat password website lewat OTP email (akun lama tanpa password). Hanya hash kode.
+    """CREATE TABLE IF NOT EXISTS worker_password_resets (
+        email      TEXT PRIMARY KEY,
+        worker_id  TEXT NOT NULL REFERENCES workers(id),
+        otp_hash   TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        attempts   INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
     # Pengaturan yang berubah saat berjalan, mis. alamat HTTPS koordinator dari './hpc.sh head-online'
     """CREATE TABLE IF NOT EXISTS settings (
         key        TEXT PRIMARY KEY,
         value      TEXT NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    # ---- Akses relawan ke compute node per jobdesk (ssh + gerbang git, lihat node_access.py) ----
+    # Compute node disediakan platform (kontainer 'node' di head); agennya sync tiap beberapa detik.
+    """CREATE TABLE IF NOT EXISTS nodes (
+        name       TEXT PRIMARY KEY,
+        ip         TEXT,
+        last_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        max_users  INT NOT NULL DEFAULT 20,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    # Satu baris = satu izin login (user jd<id>) untuk satu jobdesk. Dicabut saat jobdesk disetujui /
+    # dibatalkan: token git mati, agen memutus sesi SSH dan menghapus user-nya.
+    """CREATE TABLE IF NOT EXISTS node_access (
+        id             SERIAL PRIMARY KEY,
+        jobdesk_id     INT NOT NULL REFERENCES jobdesks(id),
+        worker_id      TEXT NOT NULL REFERENCES workers(id),
+        username       TEXT NOT NULL,
+        uid            INT NOT NULL,
+        password       TEXT NOT NULL,                 -- token node (password ssh), sama dengan git_token
+        git_token      TEXT NOT NULL UNIQUE,          -- hpc_ng_..., hanya berlaku dari IP compute node-nya
+        status         TEXT NOT NULL DEFAULT 'active',  -- active | revoked
+        node           TEXT,                          -- compute node yang menjalankan user ini
+        sessions       INT NOT NULL DEFAULT 0,        -- sesi SSH yang sedang login (laporan agen)
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+        provisioned_at TIMESTAMPTZ,
+        last_login_at  TIMESTAMPTZ,
+        revoked_at     TIMESTAMPTZ,
+        revoked_reason TEXT)""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_node_access_one_active ON node_access (jobdesk_id) WHERE status = 'active'",
+    "CREATE INDEX IF NOT EXISTS idx_node_access_node ON node_access (node, status)",
+    # Batas umur token node per jobdesk (NODE_TOKEN_TTL_DAYS); NULL = tanpa batas
+    "ALTER TABLE node_access ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
+    # Banyak compute node: port SSH tiap node + giliran penempatan (node paling lama tidak diberi akses)
+    "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ssh_port INT",
+    "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_assigned_at TIMESTAMPTZ",
 ]
 
 

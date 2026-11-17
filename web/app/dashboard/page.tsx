@@ -2,7 +2,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import JobdeskCard from "./JobdeskCard";
-import WorkerSetupCard from "./WorkerSetupCard";
 
 // Data dari koordinator (lewat /api/volunteer/me dan /api/jobs).
 type Me = {
@@ -620,10 +619,6 @@ export default function DashboardPage() {
                     {certMsg && <p className="text-[11px] text-red-300 font-mono">{certMsg}</p>}
                   </div>
 
-                  {/* Worker Setup Card */}
-                  <div className="lg:col-span-2">
-                    <WorkerSetupCard online={me.worker.online} notify={notify} />
-                  </div>
                 </div>
               </div>
             )}

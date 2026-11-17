@@ -122,14 +122,14 @@ export default function HomePage() {
                 Panduan Memulai Cepat
               </span>
               <h2 className="mt-1 text-lg font-bold text-white">
-                Jalankan Node Komputasi dalam 3 Langkah
+                Mulai Mengerjakan Jobdesk dalam 3 Langkah
               </h2>
             </div>
             <Link
               href="/register"
               className="mt-3 sm:mt-0 text-xs font-semibold text-cyber-amber-bright hover:underline flex items-center space-x-1"
             >
-              <span>Daftar & Dapatkan Token Relawan</span>
+              <span>Daftar Akun Relawan</span>
               <span>&rarr;</span>
             </Link>
           </div>
@@ -137,29 +137,24 @@ export default function HomePage() {
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div>
               <p className="text-xs text-zinc-300 font-medium mb-1">
-                1. Clone repo worker ke Ubuntu WSL2 / Linux Anda (repo ini juga tempat Anda mengerjakan jobdesk):
+                1. Register di website (GitHub + OTP email), lalu login dengan email + password.
               </p>
-              <TerminalCode
-                title="Terminal • Langkah 1: Clone Repo Worker"
-                code={`git clone https://github.com/ChanceClover/hpc-cloudservice-worker.git\ncd hpc-cloudservice-worker\nchmod +x hpc.sh`}
-              />
-
               <p className="mt-5 text-xs text-zinc-300 font-medium mb-1">
-                2. Register di website, lalu simpan alamat koordinator + token worker (perintah lengkap ada di dashboard):
+                2. Di dashboard tekan AMBIL JOBDESK. Kartu jobdesk menampilkan perintah ssh dan token node:
               </p>
               <TerminalCode
-                title="Terminal • Langkah 2: Setup Token Worker"
-                code={`./hpc.sh setup <COORDINATOR_URL> <WORKER_TOKEN>`}
+                title="Command Prompt • Langkah 2: Login Compute Node"
+                code={`ssh -p 2222 jd<id>@<alamat compute node>\n# password = token node dari dashboard`}
               />
             </div>
 
             <div>
               <p className="text-xs text-zinc-300 font-medium mb-1">
-                3. Nyalakan worker sandbox dan mulai memproses tugas:
+                3. Kerjakan branch jobdesk di compute node, push, lalu ajukan review:
               </p>
               <TerminalCode
-                title="Terminal • Langkah 3: Eksekusi Worker"
-                code={`# Jalankan worker sandbox terisolasi (angka = jumlah worker)\n./hpc.sh up 1\n\n# Pantau log eksekusi secara real-time\n./hpc.sh logs`}
+                title="Compute node • Langkah 3: Kerjakan & Ajukan"
+                code={`cd ~/hpc-cloudservice-worker\ngit add -A && git commit -m "pesan" && git push\njobdesk ajukan   # membuka Pull Request`}
               />
 
               <div className="mt-5 rounded-md border border-cyber-amber/30 bg-cyber-amber-darkest/30 p-3.5 text-xs text-amber-200">

@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 
 type Cert = {
   valid: boolean; project: string; badge: string | null; code: string; worker_name: string;
@@ -7,7 +8,8 @@ type Cert = {
 };
 
 /** Sertifikat kontributor yang bisa dicetak (Ctrl+P) dan diverifikasi publik lewat kodenya. */
-export default function CertificatePage({ params }: { params: { code: string } }) {
+export default function CertificatePage() {
+  const params = useParams<{ code: string }>();
   const [cert, setCert] = useState<Cert | null>(null);
   const [error, setError] = useState<string | null>(null);
 

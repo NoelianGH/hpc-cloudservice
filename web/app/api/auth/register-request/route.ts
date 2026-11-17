@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { requestRegistration } from "@/lib/coordinator";
+import { sameOrigin } from "@/lib/admin";
 
 export async function POST(req: Request) {
+  if (!sameOrigin(req)) return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
   try {
     const body = await req.json();
     const { workerName, githubUsername, email, password, username, firstName, lastName } = body;
@@ -15,7 +17,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    // Password dipakai untuk login website; token worker tetap untuk CLI.
+    // Password = satu-satunya cara login website.
     if (typeof password !== "string" || password.length < 8) {
       return NextResponse.json({ detail: "Password minimal 8 karakter." }, { status: 400 });
     }

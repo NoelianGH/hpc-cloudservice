@@ -1,4 +1,5 @@
 import { GitHubFactors, RegisterResponse, VerifyOtpResponse } from "./types";
+import { proxyHeaders } from "./admin";
 
 const COORDINATOR_URL = process.env.COORDINATOR_URL || "http://localhost:8000";
 
@@ -17,7 +18,7 @@ export async function requestRegistration(payload: {
   try {
     const res = await fetch(`${COORDINATOR_URL}/api/auth/register-request`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await proxyHeaders()) },
       body: JSON.stringify(payload),
       cache: "no-store",
     });
@@ -56,7 +57,7 @@ export async function verifyOtpRequest(payload: {
   try {
     const res = await fetch(`${COORDINATOR_URL}/api/auth/verify-otp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await proxyHeaders()) },
       body: JSON.stringify(payload),
       cache: "no-store",
     });
@@ -92,7 +93,7 @@ export async function resendOtpRequest(payload: { session_id: string }): Promise
   try {
     const res = await fetch(`${COORDINATOR_URL}/api/auth/resend-otp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await proxyHeaders()) },
       body: JSON.stringify(payload),
       cache: "no-store",
     });
@@ -263,14 +264,12 @@ function fallbackVerifyOtp(payload: { session_id: string; otp: string }): Verify
   }
 
   const workerId = "w-" + Math.random().toString(36).substring(2, 10);
-  const workerToken = "hpc_w_" + Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
 
   return {
     status: "authenticated",
     worker_id: workerId,
     worker_name: sess.worker_name,
     github_username: sess.github_username,
-    worker_token: workerToken,
     message: "Autentikasi berhasil! Worker kini terverifikasi dan siap diassign ke jobdesk.",
   };
 }

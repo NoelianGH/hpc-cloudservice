@@ -2,12 +2,14 @@
 Proyek perangkat lunak (repo B) yang dikerjakan relawan + CI terdistribusi di compute node.
 
 Dua peran relawan:
-  1. DEVELOPER: admin membuat jobdesk (fitur / bug repo B). SISTEM meng-assign jobdesk
-     otomatis secara FIFO ke relawan yang compute node-nya online (tanpa klik). Jobdesk tetap
-     milik relawan itu sampai selesai, walau compute node-nya mati: yang dipindah sistem ke
-     compute node lain adalah TUGAS komputasinya (lease habis -> diambil node lain). Relawan
-     bekerja di branch  task/<id>-<judul>  di repo B. Setiap push = commit SHA baru (id versi).
-     Ajukan review -> sistem membuka Pull Request; admin menyetujui -> sistem me-merge PR.
+  1. DEVELOPER: admin membuat jobdesk (fitur / bug repo B). Relawan yang login di website
+     menekan "AMBIL JOBDESK" dan mendapat jobdesk TERTUA di antrean (FIFO, tidak bisa memilih).
+     Bersamaan dengan itu sistem membuat akses COMPUTE NODE untuk jobdesk itu (node_access.py):
+     relawan login dari command prompt PC-nya (ssh jd<id>@...) dan di sana hanya bisa push ke
+     branch  task/<id>-<judul>  di repo B. Setiap push = commit SHA baru (id versi).
+     Ajukan review -> sistem membuka Pull Request; admin menyetujui -> sistem me-merge PR dan
+     MENCABUT akses compute node-nya (login website tetap). Jobdesk tetap milik relawan sampai
+     selesai. (JOBDESK_AUTO_ASSIGN=1 menyalakan lagi assign otomatis lama tanpa klik.)
   2. COMPUTE NODE: setiap push ke repo B otomatis menjadi job 'ci' (lihat jobs.py):
      build -> test terpecah per file (tugas kecil, paralel di banyak node) -> laporan.
      Tugas dibagikan FIFO, divalidasi replikasi + quorum, pindah node bila node mati.
@@ -31,6 +33,7 @@ Variabel lingkungan:
   PROJECT_WEBHOOK_SECRET  rahasia webhook GitHub (wajib bila webhook dipakai)
   PROJECT_POLL_SECONDS    bawaan 90 (0 = mati)
   JOBDESK_MAX_ACTIVE      jobdesk aktif maksimal per relawan, bawaan 1
+  JOBDESK_AUTO_ASSIGN     0 (bawaan) = relawan mengambil jobdesk di website; 1 = assign otomatis lama
   REQUIRE_CI_PASS         1 = jobdesk hanya bisa diajukan review bila CI commit terakhir lulus
   CI_REPLICAS, CI_TIMEOUT_S, CI_MEMORY_MB, CI_CPUS
 """
@@ -46,11 +49,12 @@ from pydantic import BaseModel
 from psycopg.types.json import Jsonb
 
 from admin import get_admin_session
-from common import db
+from common import db, strong_secret
 from volunteer_auth import check_volunteer_auth
 from jobs import JobError, create_job
 from publisher import _api, parse_repo, PublishError
 import watch
+import node_access
 
 PROJECT_REPO_URL = os.environ.get("PROJECT_REPO_URL", "").strip().rstrip("/")
 PROJECT_APP_NAME = os.environ.get("PROJECT_APP_NAME", "").strip() or "Aplikasi proyek (repo B)"
@@ -60,13 +64,14 @@ GIT_TOKEN = os.environ.get("PROJECT_GIT_TOKEN", "").strip()
 WEBHOOK_SECRET = os.environ.get("PROJECT_WEBHOOK_SECRET", "").strip()
 POLL_SECONDS = float(os.environ.get("PROJECT_POLL_SECONDS", "90") or 0)
 MAX_ACTIVE = int(os.environ.get("JOBDESK_MAX_ACTIVE", "1") or 1)
+AUTO_ASSIGN = os.environ.get("JOBDESK_AUTO_ASSIGN", "0").strip() == "1"
 ONLINE_SECONDS = 60   # worker dianggap online bila claim/heartbeat terakhir < 60 detik lalu
 REQUIRE_CI_PASS = os.environ.get("REQUIRE_CI_PASS", "1") != "0"
 CI_REPLICAS = int(os.environ.get("CI_REPLICAS", "2") or 2)
 CI_RESOURCES = {"cpus": float(os.environ.get("CI_CPUS", "1") or 1),
                 "memory_mb": int(os.environ.get("CI_MEMORY_MB", "512") or 512),
                 "timeout_s": int(os.environ.get("CI_TIMEOUT_S", "300") or 300)}
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+ADMIN_TOKEN = strong_secret("ADMIN_TOKEN")
 # Alamat koordinator yang dipakai worker relawan (diisi otomatis oleh './hpc.sh head-online',
 # atau tetap lewat .env bila koordinator punya domain sendiri)
 PUBLIC_COORDINATOR_URL = os.environ.get("PUBLIC_COORDINATOR_URL", "").strip().rstrip("/")
@@ -345,8 +350,14 @@ _JD_SQL = """
            d.last_sha, d.last_ci_job, d.last_ci_status, d.created_at, d.assigned_at, d.submitted_at,
            d.done_at, d.updated_at, d.pr_number, d.pr_url, d.merged_sha,
            w.name AS worker_name, w.github_username, w.last_seen AS worker_last_seen,
-           coalesce((now() - w.last_seen) < interval '60 seconds', false) AS worker_online
+           coalesce((now() - w.last_seen) < interval '60 seconds', false) AS worker_online,
+           na.username AS node_user, na.node AS node_name, na.sessions AS node_sessions,
+           na.provisioned_at IS NOT NULL AS node_ready, na.last_login_at AS node_last_login,
+           na.expires_at AS node_expires_at,
+           (SELECT x.revoked_reason FROM node_access x WHERE x.jobdesk_id = d.id AND x.status = 'revoked'
+             ORDER BY x.id DESC LIMIT 1) AS node_last_revoke
     FROM jobdesks d LEFT JOIN workers w ON w.id = d.worker_id
+    LEFT JOIN node_access na ON na.jobdesk_id = d.id AND na.status = 'active'
 """
 
 
@@ -368,7 +379,8 @@ def project_info() -> dict:
             "default_branch": DEFAULT_BRANCH, "branch_prefix": BRANCH_PREFIX,
             "github_token": bool(GIT_TOKEN), "webhook": bool(WEBHOOK_SECRET),
             "poll_seconds": POLL_SECONDS, "require_ci_pass": REQUIRE_CI_PASS,
-            "max_active": MAX_ACTIVE, "ci_resources": CI_RESOURCES, "ci_replicas": CI_REPLICAS}
+            "max_active": MAX_ACTIVE, "ci_resources": CI_RESOURCES, "ci_replicas": CI_REPLICAS,
+            "auto_assign": AUTO_ASSIGN, "node_access": node_access.ENABLED}
 
 
 def _ci_rows(c, where: str = "TRUE", args: tuple = (), limit: int = 30) -> list[dict]:
@@ -401,6 +413,11 @@ def _ci_rows(c, where: str = "TRUE", args: tuple = (), limit: int = 30) -> list[
 def _git_help(branch: str | None) -> list[str]:
     if not (PROJECT_REPO_URL and branch):
         return []
+    if node_access.ENABLED:   # dikerjakan di compute node: repo sudah di-clone, hanya branch ini
+        repo = PROJECT_REPO_URL.rsplit('/', 1)[-1]
+        return [f"cd ~/{repo}          # sudah berisi branch {branch}", "# ... ngoding (nano / vim / python3), lalu:",
+                "git add -A && git commit -m \"<pesan>\"", "git push", "jobdesk              # status jobdesk + CI",
+                "jobdesk ajukan       # ajukan review (sistem membuka Pull Request)"]
     return [f"git clone {PROJECT_REPO_URL}.git", f"cd {PROJECT_REPO_URL.rsplit('/', 1)[-1]}",
             "git fetch origin", f"git switch {branch} 2>/dev/null || git switch -c {branch} origin/{DEFAULT_BRANCH}",
             "# ... ngoding di VS Code, lalu:", "git add -A && git commit -m \"<pesan>\"",
@@ -437,12 +454,17 @@ def my_jobdesk(authorization: str = Header(None)):
                        "FROM workers WHERE id = %s", (ONLINE_SECONDS, w["id"])).fetchone()
         branches = [d["branch"] for d in mine if d["branch"]]
         ci = _ci_rows(c, "spec->>'branch' = ANY(%s)", (branches,), 10) if branches else []
-    active = [d for d in mine if d["status"] in ("in_progress", "review")]
-    for d in active:
-        d["git"] = _git_help(d["branch"])
+        active = [d for d in mine if d["status"] in ("in_progress", "review")]
+        for d in active:
+            d["git"] = _git_help(d["branch"])
+            d["node"] = node_access.access_for_volunteer(c, d["id"]) if node_access.ENABLED else None
+            # Tidak ada akses aktif (mis. token kedaluwarsa / dicabut admin): jelaskan alasannya
+            d["node_revoked"] = node_access.last_revoked(c, d["id"]) if node_access.ENABLED and not d["node"] else None
+        node_cap = node_access.capacity(c) if node_access.ENABLED else None
     return {"project": project_info(), "active": active,
             "history": [d for d in mine if d["status"] not in ("in_progress", "review")],
-            "queue_open": queue, "online": me["online"], "last_seen": me["last_seen"], "ci": ci}
+            "queue_open": queue, "online": me["online"], "last_seen": me["last_seen"], "ci": ci,
+            "node_capacity": node_cap}
 
 
 def _my_active(c, w: dict, jid: int) -> dict:
@@ -454,11 +476,15 @@ def _my_active(c, w: dict, jid: int) -> dict:
 
 @router.post("/api/me/jobdesk/{jid}/submit")
 def submit_jobdesk(jid: int, authorization: str = Header(None)):
+    return do_submit(_volunteer(authorization), jid)
+
+
+def do_submit(w: dict, jid: int, actor: str | None = None) -> dict:
     """
-    Ajukan review. Bila REQUIRE_CI_PASS, CI commit terakhir di branch harus lulus.
-    Dengan PROJECT_GIT_TOKEN, sistem membuka Pull Request branch jobdesk -> branch default.
+    Ajukan review (dari website atau 'jobdesk ajukan' di compute node). Bila REQUIRE_CI_PASS,
+    CI commit terakhir di branch harus lulus. Dengan PROJECT_GIT_TOKEN, sistem membuka Pull
+    Request branch jobdesk -> branch default.
     """
-    w = _volunteer(authorization)
     with db() as c:
         with c.transaction():
             d = _my_active(c, w, jid)
@@ -471,13 +497,66 @@ def submit_jobdesk(jid: int, authorization: str = Header(None)):
                                          f"(status CI terakhir: {d['last_ci_status'] or 'belum ada push'}).")
             c.execute("UPDATE jobdesks SET status = 'review', submitted_at = now(), updated_at = now() "
                       "WHERE id = %s", (jid,))
-            _event(c, jid, w["name"], "review", f"diajukan @ {(d['last_sha'] or '-')[:7]}")
+            _event(c, jid, actor or w["name"], "review", f"diajukan @ {(d['last_sha'] or '-')[:7]}")
         pr = open_pull_request(d, w)
         if pr.get("number"):
             c.execute("UPDATE jobdesks SET pr_number = %s, pr_url = %s WHERE id = %s",
                       (pr["number"], pr["url"], jid))
         _event(c, jid, "sistem", "pull_request", pr.get("url") or pr["status"])
     return {"ok": True, "pull_request": pr}
+
+
+@router.post("/api/me/jobdesk/take")
+def take_jobdesk(authorization: str = Header(None)):
+    """
+    "AMBIL JOBDESK" di website (butuh login website, bukan token CLI). Relawan TIDAK memilih:
+    sistem memberi jobdesk yang paling lama menunggu di antrean (FIFO). Sekaligus dibuat akses
+    compute node untuk jobdesk itu.
+    """
+    _need_project()
+    w = check_volunteer_auth(authorization, web_only=True)["worker"]
+    with db() as c:
+        with c.transaction():
+            c.execute("SELECT pg_advisory_xact_lock(727002)")   # satu pengambilan pada satu waktu
+            c.execute("SELECT id FROM workers WHERE id = %s FOR UPDATE", (w["id"],))
+            n = c.execute("""SELECT count(*) AS n FROM jobdesks WHERE worker_id = %s
+                             AND status IN ('in_progress', 'review')""", (w["id"],)).fetchone()["n"]
+            if n >= MAX_ACTIVE:
+                raise HTTPException(409, "Selesaikan jobdesk aktif Anda dulu (sampai disetujui admin) "
+                                         "sebelum mengambil jobdesk baru.")
+            d = c.execute("""SELECT id, title, branch FROM jobdesks WHERE status = 'open'
+                             ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED""").fetchone()
+            if not d:
+                raise HTTPException(404, "Antrean jobdesk kosong. Coba lagi nanti.")
+            if node_access.ENABLED:
+                cap = node_access.capacity(c)
+                if cap["free"] <= 0:
+                    raise HTTPException(409, f"Semua compute node penuh ({cap['used']}/{cap['total']} relawan aktif). "
+                                             "Jobdesk tetap di antrean; coba lagi setelah ada jobdesk yang disetujui.")
+            branch = _assign(c, d, w, "diambil lewat website (FIFO)")
+        _after_assign(c, d["id"], branch, w)
+    return {"ok": True, "jobdesk_id": d["id"], "branch": branch}
+
+
+def _assign(c, d: dict, w: dict, how: str) -> str:
+    """Tandai jobdesk milik relawan + buat akses compute node (di dalam transaksi)."""
+    branch = d["branch"] or f"{BRANCH_PREFIX}{d['id']}-{slug(d['title'])}"
+    c.execute("""UPDATE jobdesks SET status = 'in_progress', worker_id = %s, branch = %s, note = NULL,
+                        assigned_at = now(), updated_at = now() WHERE id = %s""", (w["id"], branch, d["id"]))
+    _event(c, d["id"], "sistem", "di-assign", f"{how}: {w['name']} (@{w.get('github_username') or '-'})"
+           + (" melanjutkan branch yang sudah ada" if d["branch"] else ""))
+    node_access.create_access(c, d["id"], w["id"])
+    return branch
+
+
+def _after_assign(c, jid: int, branch: str, w: dict) -> None:
+    """Panggilan GitHub di luar transaksi: buat branch (+ undang collaborator bila tanpa compute node)."""
+    made = create_branch(branch)
+    # Dengan akses compute node, relawan TIDAK diundang jadi collaborator: satu-satunya jalan push
+    # adalah gerbang git koordinator yang membatasi ke branch jobdesk-nya.
+    invite = "tidak perlu (push lewat compute node)" if node_access.ENABLED else invite_collaborator(w.get("github_username"))
+    _event(c, jid, "sistem", "branch", f"branch {branch}: {made}; collaborator: {invite}")
+    log(f"jobdesk #{jid} -> {w['name']} di {branch} (branch {made}, collaborator {invite})")
 
 
 # =============================================================================
@@ -491,7 +570,7 @@ def auto_assign(c) -> None:
       - relawan: hanya yang compute node-nya ONLINE (worker berjalan) dan belum punya jobdesk
         aktif; yang paling lama menganggur (jobdesk terakhir selesai paling awal) didahulukan.
     """
-    if not enabled():
+    if not enabled() or not AUTO_ASSIGN:
         return
     done = []
     for _ in range(20):
@@ -510,18 +589,10 @@ def auto_assign(c) -> None:
                              ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED""").fetchone()
             if not d:
                 break
-            branch = d["branch"] or f"{BRANCH_PREFIX}{d['id']}-{slug(d['title'])}"
-            c.execute("""UPDATE jobdesks SET status = 'in_progress', worker_id = %s, branch = %s,
-                                assigned_at = now(), updated_at = now() WHERE id = %s""",
-                      (w["id"], branch, d["id"]))
-            _event(c, d["id"], "sistem", "di-assign", f"FIFO ke {w['name']} (@{w['github_username']})"
-                   + (" melanjutkan branch yang sudah ada" if d["branch"] else ""))
+            branch = _assign(c, d, w, "assign otomatis FIFO")
         done.append((d["id"], branch, w))
     for jid, branch, w in done:  # panggilan GitHub di luar transaksi
-        made = create_branch(branch)
-        invite = invite_collaborator(w["github_username"])
-        _event(c, jid, "sistem", "branch", f"branch {branch}: {made}; collaborator: {invite}")
-        log(f"jobdesk #{jid} di-assign ke {w['name']} -> {branch} (branch {made}, collaborator {invite})")
+        _after_assign(c, jid, branch, w)
 
 
 # =============================================================================
@@ -593,7 +664,10 @@ def admin_jobdesk_action(jid: int, body: JobdeskAction, authorization: str = Hea
     # Tidak ada aksi "pindahkan ke relawan lain": penugasan sepenuhnya oleh sistem (FIFO),
     # termasuk pemindahan otomatis saat compute node relawan offline.
     allowed = {"approve": ("review",), "revise": ("review",),
-               "cancel": ("open", "in_progress", "review"), "reopen": ("cancelled", "done")}
+               "cancel": ("open", "in_progress", "review"), "reopen": ("cancelled", "done"),
+               # mis. token node kedaluwarsa & relawan tidak melanjutkan: kembali ke antrean (FIFO),
+               # branch + commit yang sudah di-push tetap, relawan berikutnya melanjutkan
+               "requeue": ("in_progress", "review")}
     if body.action not in allowed:
         raise HTTPException(400, "Aksi tidak dikenal.")
     with db() as c:
@@ -613,13 +687,20 @@ def admin_jobdesk_action(jid: int, body: JobdeskAction, authorization: str = Hea
                 if merged:
                     _event(c, jid, "sistem", "merge", f"PR #{d['pr_number']} di-merge ke {DEFAULT_BRANCH} ({merged[:7]})")
                 c.execute("UPDATE workers SET credits = credits + %s WHERE id = %s", (d["credit"], d["worker_id"]))
+                node_access.revoke_access(c, jid, "jobdesk disetujui admin (PR di-merge)")
             elif body.action == "revise":
                 c.execute("UPDATE jobdesks SET status = 'in_progress', updated_at = now(), note = %s "
                           "WHERE id = %s", (note or "Perlu revisi", jid))
             elif body.action == "cancel":
                 c.execute("UPDATE jobdesks SET status = 'cancelled', updated_at = now(), note = %s WHERE id = %s",
                           (note, jid))
-            else:  # reopen
+                node_access.revoke_access(c, jid, "jobdesk dibatalkan admin")
+            elif body.action == "requeue":
+                node_access.revoke_access(c, jid, "jobdesk dikembalikan ke antrean")
+                c.execute("UPDATE jobdesks SET status = 'open', worker_id = NULL, updated_at = now(), note = %s "
+                          "WHERE id = %s", (note or "Dikembalikan ke antrean oleh admin", jid))
+            else:  # reopen (akses node lama sudah dicabut saat disetujui / dibatalkan)
+                node_access.revoke_access(c, jid, "jobdesk dibuka ulang")
                 c.execute("UPDATE jobdesks SET status = 'open', worker_id = NULL, done_at = NULL, pr_number = NULL, "
                           "pr_url = NULL, merged_sha = NULL, updated_at = now(), note = %s WHERE id = %s", (note, jid))
             _event(c, jid, who, body.action, note or "")
@@ -628,6 +709,8 @@ def admin_jobdesk_action(jid: int, body: JobdeskAction, authorization: str = Hea
 
 class PublicUrl(BaseModel):
     url: str
+    ssh_url: str | None = None   # tunnel SSH node1 (head-online), mis. https://xxx.trycloudflare.com
+    ssh_urls: dict[str, str] = {}   # tunnel SSH per compute node {"node1": "...", "node2": "..."}
 
 
 @router.post("/api/admin/public-url")
@@ -637,11 +720,28 @@ def admin_public_url(body: PublicUrl, authorization: str = Header(None)):
     url = body.url.strip().rstrip("/")
     if not re.match(r"^https?://[A-Za-z0-9.-]+(:\d+)?$", url):
         raise HTTPException(400, "Alamat tidak valid, contoh: https://contoh-acak.trycloudflare.com")
+    urls = dict(body.ssh_urls)
+    if body.ssh_url and "node1" not in urls:
+        urls["node1"] = body.ssh_url
+    ssh = {}
+    for node, u in urls.items():
+        host = (u or "").strip().rstrip("/").removeprefix("https://").removeprefix("http://")
+        if not host:
+            continue
+        if not re.match(r"^[A-Za-z0-9_.-]{1,40}$", node) or not re.match(r"^[A-Za-z0-9.-]+$", host):
+            raise HTTPException(400, "Alamat SSH tidak valid, contoh: https://contoh-acak.trycloudflare.com")
+        ssh[node] = host
     with db() as c:
         c.execute("""INSERT INTO settings (key, value) VALUES ('public_coordinator_url', %s)
                      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (url,))
-    log(f"[PROYEK] Alamat koordinator untuk relawan: {url}")
-    return {"ok": True, "coordinator_url": url}
+        if ssh:
+            c.execute("DELETE FROM settings WHERE key LIKE 'public_ssh_host%%'")
+        for node, host in ssh.items():
+            c.execute("""INSERT INTO settings (key, value) VALUES (%s, %s)
+                         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                      (f"public_ssh_host:{node}", host))
+    log(f"[PROYEK] Alamat koordinator untuk relawan: {url}" + (f", SSH compute node: {ssh}" if ssh else ""))
+    return {"ok": True, "coordinator_url": url, "ssh_hosts": ssh}
 
 
 @router.get("/api/admin/ci")
@@ -744,6 +844,9 @@ async def github_webhook(request: Request, x_github_event: str = Header(None),
         return {"ok": True, "ignored": "bukan push branch"}
     forced = bool(ev.get("forced"))
     with db() as c:
+        if node_access.ENABLED and c.execute("""SELECT 1 FROM node_access a JOIN jobdesks d ON d.id = a.jobdesk_id
+                                               WHERE d.branch = %s AND a.status = 'active'""", (branch,)).fetchone():
+            pusher = None   # push lewat gerbang compute node memakai token platform; pemiliknya dicatat gerbang
         if not ci_branch(branch):
             note_push(c, branch, sha, "webhook", pusher, forced)
             return {"ok": True, "ignored": f"branch {branch} tidak di-CI"}

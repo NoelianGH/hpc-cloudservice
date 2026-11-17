@@ -7,7 +7,42 @@ from psycopg.rows import dict_row
 from fastapi import HTTPException
 
 DB_URL = os.environ["DATABASE_URL"]
-WORKER_TOKEN = os.environ.get("WORKER_TOKEN", "")
+
+# Nilai contoh dari .env.example / dokumentasi: TIDAK PERNAH diterima sebagai rahasia, karena
+# siapa pun yang membaca repo ini tahu nilainya. './hpc.sh head-up' menggantinya dengan nilai acak.
+EXAMPLE_SECRETS = {"token-admin-sementara", "token-relawan-sementara", "ganti-password-db",
+                   "admintok", "wtok", "changeme", "rahasia", "secret", "password"}
+MIN_SECRET_LEN = 16
+
+
+def strong_secret(name: str) -> str:
+    """Isi env var rahasia, atau "" (fitur dimatikan) bila kosong / nilai contoh / terlalu pendek."""
+    v = os.environ.get(name, "").strip()
+    if not v:
+        return ""
+    if v.lower() in EXAMPLE_SECRETS or len(v) < MIN_SECRET_LEN:
+        print(f"[KEAMANAN] {name} masih nilai contoh / terlalu pendek (< {MIN_SECRET_LEN} karakter): "
+              f"DIABAIKAN. Jalankan './hpc.sh head-up' untuk membuat nilai acak.", flush=True)
+        return ""
+    return v
+
+
+WORKER_TOKEN = strong_secret("WORKER_TOKEN")
+# Rahasia bersama web (Next.js) <-> koordinator: hanya permintaan yang membawanya boleh memberi
+# tahu IP asli pengunjung (X-HPC-Client-IP). Tanpa ini semua login lewat web terlihat dari satu IP
+# (server web), sehingga batas gagal-login per IP bisa mengunci SEMUA orang sekaligus.
+WEB_PROXY_SECRET = strong_secret("WEB_PROXY_SECRET")
+
+
+def client_ip(request) -> str:
+    """IP pengunjung: dari server web tepercaya (X-HPC-Client-IP + kunci), selain itu IP koneksi."""
+    direct = request.client.host if request.client else "?"
+    if WEB_PROXY_SECRET:
+        key = request.headers.get("x-hpc-proxy-key", "")
+        fwd = request.headers.get("x-hpc-client-ip", "").strip()[:64]
+        if fwd and key and hmac.compare_digest(key.encode(), WEB_PROXY_SECRET.encode()):
+            return fwd
+    return direct
 
 
 def db():

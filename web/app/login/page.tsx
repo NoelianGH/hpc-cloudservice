@@ -3,17 +3,19 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 
 /**
- * Login website relawan dengan EMAIL + PASSWORD (dibuat saat Register).
- * Token worker (hpc_w_...) khusus untuk CLI/worker; di sini hanya dipakai sekali oleh akun lama
- * dari './hpc.sh worker-login' yang belum punya password, lalu password dibuat di dashboard.
+ * Login website relawan hanya dengan EMAIL + PASSWORD (dibuat saat Register).
+ * Akun lama tanpa password / lupa password: mode "reset" mengirim kode OTP ke email, lalu
+ * password baru disimpan. Token apa pun (worker / node) tidak bisa dipakai login website.
  * Server menyimpan SESI web di cookie httpOnly selama 7 hari, jadi tidak perlu login ulang.
  */
 export default function LoginPage() {
-  const [mode, setMode] = useState<"password" | "token">("password");
+  const [mode, setMode] = useState<"password" | "reset">("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [workerToken, setWorkerToken] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
@@ -25,12 +27,39 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setInfoMsg(null);
     setLoading(true);
     try {
+      if (mode === "reset") {
+        const body = otpSent
+          ? { action: "reset", email: email.trim(), otp: otp.trim(), password }
+          : { action: "request", email: email.trim() };
+        const res = await fetch("/api/volunteer/password-reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setErrorMsg(data.detail || "Permintaan ditolak koordinator.");
+          return;
+        }
+        if (!otpSent) {
+          setOtpSent(true);
+          setInfoMsg(data.message || "Kode OTP dikirim ke email Anda.");
+        } else {
+          setMode("password");
+          setOtpSent(false);
+          setOtp("");
+          setPassword("");
+          setInfoMsg(data.message || "Password tersimpan. Silakan login.");
+        }
+        return;
+      }
       const res = await fetch("/api/volunteer/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mode === "password" ? { email: email.trim(), password } : { token: workerToken.trim() }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -86,6 +115,12 @@ export default function LoginPage() {
           </div>
         )}
 
+        {infoMsg && !errorMsg && (
+          <div className="mt-6 rounded border border-emerald-500/50 bg-emerald-950/40 p-3 font-mono text-xs text-emerald-300">
+            {infoMsg}
+          </div>
+        )}
+
         {errorMsg && (
           <div className="mt-6 rounded border border-red-500/50 bg-red-950/40 p-3 font-mono text-xs text-red-300">
             Peringatan: {errorMsg}
@@ -94,73 +129,78 @@ export default function LoginPage() {
 
         <div className="cyber-box mt-6 p-6 sm:p-8">
           <form onSubmit={handleLogin} className="space-y-4">
-            {mode === "password" ? (
-              <>
-                <div>
-                  <label className="block font-mono text-[11px] text-zinc-300">EMAIL</label>
-                  <input type="email" required autoComplete="email" value={email}
-                    onChange={(e) => setEmail(e.target.value)} placeholder="nama@kampus.ac.id" className={input} />
-                </div>
-                <div>
-                  <label className="block font-mono text-[11px] text-zinc-300">PASSWORD</label>
-                  <div className="relative mt-1">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className={`${input} mt-0 pr-10`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-cyber-amber-bright focus:outline-none p-1 transition-colors"
-                      title={showPassword ? "Sembunyikan password" : "Lihat password"}
-                      aria-label={showPassword ? "Sembunyikan password" : "Lihat password"}
-                    >
-                      {showPassword ? (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
-                        </svg>
-                      ) : (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
+            <div>
+              <label className="block font-mono text-[11px] text-zinc-300">EMAIL</label>
+              <input type="email" required autoComplete="email" value={email} disabled={mode === "reset" && otpSent}
+                onChange={(e) => setEmail(e.target.value)} placeholder="nama@kampus.ac.id" className={input} />
+            </div>
+            {mode === "reset" && otpSent && (
               <div>
-                <label className="block font-mono text-[11px] text-zinc-300">WORKER_TOKEN</label>
-                <textarea rows={3} required value={workerToken} onChange={(e) => setWorkerToken(e.target.value)}
-                  placeholder="hpc_w_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" className={`${input} text-cyber-amber-bright`} />
-                <p className="mt-1 font-mono text-[10px] text-zinc-500">
-                  Hanya untuk akun yang dibuat lewat <code>./hpc.sh worker-login</code> dan belum punya password.
-                  Setelah masuk, buat password di dashboard; berikutnya login cukup dengan email + password.
-                </p>
+                <label className="block font-mono text-[11px] text-zinc-300">KODE OTP (DARI EMAIL)</label>
+                <input inputMode="numeric" required maxLength={6} value={otp} autoComplete="one-time-code"
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="123456"
+                  className={`${input} tracking-[0.4em] text-cyber-amber-bright`} />
               </div>
+            )}
+            {(mode === "password" || otpSent) && (
+              <div>
+                <label className="block font-mono text-[11px] text-zinc-300">
+                  {mode === "reset" ? "PASSWORD BARU (MIN. 8 KARAKTER)" : "PASSWORD"}
+                </label>
+                <div className="relative mt-1">
+                  <input type={showPassword ? "text" : "password"} required minLength={mode === "reset" ? 8 : undefined}
+                    autoComplete={mode === "reset" ? "new-password" : "current-password"} value={password}
+                    onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className={`${input} mt-0 pr-10`} />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-cyber-amber-bright focus:outline-none p-1 transition-colors"
+                    title={showPassword ? "Sembunyikan password" : "Lihat password"}
+                    aria-label={showPassword ? "Sembunyikan password" : "Lihat password"}
+                  >
+                    {showPassword ? (
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                      </svg>
+                    ) : (
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+            {mode === "reset" && (
+              <p className="font-mono text-[10px] text-zinc-500">
+                Untuk akun lama yang belum punya password, atau lupa password. Kode OTP 6 angka dikirim ke email
+                akun Anda dan berlaku 10 menit. Setelah password disimpan, semua sesi login lama keluar.
+              </p>
             )}
 
             <button
               type="submit"
-              disabled={loading || (mode === "password" ? !email.trim() || !password : !workerToken.trim())}
+              disabled={loading || !email.trim() || ((mode === "password" || otpSent) && !password) || (otpSent && otp.length !== 6)}
               className="mt-6 flex w-full items-center justify-center space-x-2 rounded border border-cyber-amber bg-cyber-amber py-3 font-mono text-xs font-bold text-cyber-void shadow-amber-glow transition-all hover:bg-cyber-amber-bright hover:shadow-amber-glow-lg disabled:opacity-50"
             >
-              <span>{loading ? "MEMERIKSA..." : "MASUK"}</span>
+              <span>{loading ? "MEMERIKSA..." : mode === "password" ? "MASUK" : otpSent ? "SIMPAN PASSWORD" : "KIRIM KODE OTP"}</span>
               <span>&rarr;</span>
             </button>
 
             <button
               type="button"
-              onClick={() => { setMode(mode === "password" ? "token" : "password"); setErrorMsg(null); }}
+              onClick={() => {
+                setMode(mode === "password" ? "reset" : "password");
+                setOtpSent(false);
+                setOtp("");
+                setPassword("");
+                setErrorMsg(null);
+                setInfoMsg(null);
+              }}
               className="w-full text-center font-mono text-[11px] text-zinc-400 hover:text-cyber-amber-bright"
             >
-              {mode === "password" ? "Akun lama tanpa password? Masuk dengan token worker" : "Kembali ke login email + password"}
+              {mode === "password" ? "Lupa / belum punya password?" : "Kembali ke login email + password"}
             </button>
           </form>
 

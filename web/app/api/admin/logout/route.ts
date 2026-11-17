@@ -6,7 +6,7 @@ export async function POST(req: Request) {
   if (!sameOrigin(req)) {
     return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
   }
-  const token = cookies().get(ADMIN_COOKIE)?.value;
+  const token = (await cookies()).get(ADMIN_COOKIE)?.value;
   if (token) {
     await coordinatorFetch("/api/admin/logout", { method: "POST", token });
   }

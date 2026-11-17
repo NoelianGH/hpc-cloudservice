@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /** Status login untuk navbar: { logged_in, username, github_username }. */
 export async function GET() {
-  const session = cookies().get(WORKER_COOKIE)?.value;
+  const session = (await cookies()).get(WORKER_COOKIE)?.value;
   if (!session) return NextResponse.json({ logged_in: false });
   const { status, data } = await coordinatorFetch("/api/auth/session", { token: session });
   if (status === 200) {

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /** Update profil relawan (nama, email, github username). */
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
-  const session = cookies().get(WORKER_COOKIE)?.value;
+  const session = (await cookies()).get(WORKER_COOKIE)?.value;
   if (!session) return NextResponse.json({ detail: "Belum login." }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const { status, data } = await coordinatorFetch("/api/me/profile", {

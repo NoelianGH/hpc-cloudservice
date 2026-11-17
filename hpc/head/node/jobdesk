@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""
+Perintah relawan di compute node.
+  jobdesk            status jobdesk, branch, CI commit terakhir, Pull Request
+  jobdesk ajukan     ajukan review: sistem membuka Pull Request ke main (CI terakhir harus LULUS)
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+CONF = os.path.expanduser("~/.hpc-node")
+
+
+def call(method, path):
+    with open(CONF) as f:
+        conf = json.load(f)
+    req = urllib.request.Request(conf["coordinator"].rstrip("/") + path, method=method, data=b"" if method == "POST" else None,
+                                 headers={"Authorization": f"Bearer {conf['token']}"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read()).get("detail")
+        except Exception:
+            detail = None
+        sys.exit(f"Gagal ({e.code}): {detail or e.reason}")
+    except urllib.error.URLError as e:
+        sys.exit(f"Koordinator tidak bisa dihubungi: {e.reason}")
+
+
+def status():
+    d = call("GET", "/api/node/me")
+    j = d["jobdesk"]
+    label = {"in_progress": "SEDANG DIKERJAKAN", "review": "MENUNGGU REVIEW ADMIN"}.get(j["status"], j["status"])
+    print(f"Jobdesk #{j['id']}  {j['title']}  ({j['kind']}, {j['credit']} kredit)")
+    print(f"Status : {label}")
+    print(f"Branch : {j['branch']}")
+    if j.get("note"):
+        print(f"Catatan admin: {j['note']}")
+    if j.get("last_sha"):
+        print(f"Commit : {j['last_sha'][:7]}   CI: {(j.get('last_ci_status') or '-').upper()}"
+              + (f" (job #{j['last_ci_job']})" if j.get("last_ci_job") else ""))
+    else:
+        print("Commit : belum ada push. git add -A && git commit -m \"...\" && git push")
+    if j.get("pr_url"):
+        print(f"PR     : {j['pr_url']}")
+    if j["status"] == "in_progress":
+        print("\nSelesai? Jalankan:  jobdesk ajukan" + ("   (CI commit terakhir harus LULUS)" if d.get("require_ci_pass") else ""))
+
+
+def submit():
+    r = call("POST", "/api/node/me/submit")
+    pr = r.get("pull_request") or {}
+    print("Jobdesk diajukan. Admin akan meninjau kode Anda.")
+    if pr.get("url"):
+        print(f"Pull Request: {pr['url']}")
+    print("Setelah admin menyetujui, akses compute node ini otomatis berakhir (sesi SSH diputus).")
+    print("Jobdesk berikutnya diambil lewat website.")
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if cmd in ("status", "info"):
+        status()
+    elif cmd in ("ajukan", "submit", "pr"):
+        submit()
+    else:
+        print(__doc__.strip())

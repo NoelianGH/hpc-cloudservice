@@ -3,7 +3,27 @@
  * Token sesi admin disimpan di cookie httpOnly (tidak bisa dibaca JavaScript di browser),
  * lalu diteruskan ke koordinator sebagai header Authorization oleh route /api/admin/*.
  */
+import { headers as requestHeaders } from "next/headers";
+
 export const COORDINATOR_URL = process.env.COORDINATOR_URL || "http://localhost:8000";
+
+/**
+ * Header untuk koordinator berisi IP asli pengunjung, ditandatangani WEB_PROXY_SECRET (dari .env,
+ * dibuat './hpc.sh head-up'). Tanpa ini koordinator melihat semua login datang dari IP server web,
+ * sehingga kunci "terlalu banyak gagal login per IP" bisa mengunci semua pengunjung sekaligus.
+ * IP diambil dari X-Forwarded-For / X-Real-IP yang dipasang reverse proxy (Cloudflare / nginx) di depan web.
+ */
+export async function proxyHeaders(): Promise<Record<string, string>> {
+  const secret = process.env.WEB_PROXY_SECRET || "";
+  if (!secret) return {};
+  try {
+    const h = await requestHeaders();
+    const ip = (h.get("cf-connecting-ip") || h.get("x-forwarded-for")?.split(",")[0] || h.get("x-real-ip") || "").trim();
+    return ip ? { "X-HPC-Proxy-Key": secret, "X-HPC-Client-IP": ip.slice(0, 64) } : {};
+  } catch {
+    return {}; // dipanggil di luar request (mis. saat build)
+  }
+}
 export const ADMIN_COOKIE = "hpc_admin_session";
 
 export function isHttps(req: Request): boolean {
@@ -29,7 +49,7 @@ export async function coordinatorFetch(
   path: string,
   init: { method?: string; body?: string | Record<string, unknown>; token?: string } = {}
 ): Promise<{ status: number; data: any }> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(await proxyHeaders()) };
   if (init.token) headers["Authorization"] = `Bearer ${init.token}`;
   const rawBody = init.body == null ? undefined
     : typeof init.body === "string" ? init.body
