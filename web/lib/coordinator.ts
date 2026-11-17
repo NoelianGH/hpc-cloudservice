@@ -9,6 +9,8 @@ export async function requestRegistration(payload: {
   worker_name: string;
   github_username: string;
   email: string;
+  password: string;
+  username?: string;
 }): Promise<RegisterResponse> {
   try {
     const res = await fetch(`${COORDINATOR_URL}/api/auth/register-request`, {

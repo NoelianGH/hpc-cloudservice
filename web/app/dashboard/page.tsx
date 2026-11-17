@@ -1,14 +1,14 @@
 "use client";
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import TerminalCode from "@/components/TerminalCode";
 import JobdeskCard from "./JobdeskCard";
+import WorkerSetupCard from "./WorkerSetupCard";
 
 // Data dari koordinator (lewat /api/volunteer/me dan /api/jobs). Tidak ada angka contoh.
 type Me = {
   worker: {
     id: string; name: string; github_username: string | null; email: string | null; status: string;
-    created_at: string; online: boolean; last_seen: string
+    created_at: string; online: boolean; last_seen: string; has_password?: boolean
   };
   stats: {
     credits: number; rank: number | null; of: number; badge: string | null;
@@ -57,11 +57,19 @@ export default function DashboardPage() {
   const [busy, setBusy] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [consentSubmitting, setConsentSubmitting] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null);
+
+  // Notifikasi kecil di pojok layar (pengganti alert())
+  const notify = useCallback((msg: string, tone: "ok" | "err" = "ok") => {
+    setToast({ msg, tone });
+    window.setTimeout(() => setToast((t) => (t?.msg === msg ? null : t)), 5000);
+  }, []);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/volunteer/me", { cache: "no-store" });
     if (r.status === 401 || r.status === 403) {
-      window.location.href = "/login";
+      // Sesi habis/dicabut: cookie sudah dihapus server, jadi /login tidak memantul balik
+      window.location.href = "/login?expired=1";
       return;
     }
     const d = await r.json();
@@ -176,6 +184,8 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {me.worker.has_password === false && <PasswordCard notify={notify} onDone={load} />}
+
         <JobdeskCard />
 
         {/* Statistik */}
@@ -228,17 +238,8 @@ export default function DashboardPage() {
             {certMsg && <p className="text-[11px] text-red-300">{certMsg}</p>}
           </div>
 
-          {/* Menjalankan worker */}
-          <div className="cyber-box p-6 lg:col-span-2">
-            <div className="text-xs font-bold text-cyber-amber-bright uppercase tracking-wider font-mono">Jalankan Worker Anda (Peran Compute Node)</div>
-            <p className="mt-1 text-[11px] text-zinc-400">
-              Kredit hanya bertambah bila hasil worker Anda sama dengan hasil worker lain (replikasi + quorum).
-            </p>
-            <TerminalCode
-              title="Terminal • Kontrol Worker WSL2"
-              code={`./hpc.sh worker-status   # cek token di .env\n./hpc.sh worker-up 1      # jalankan 1 worker sandbox (1 CPU, 512 MB)\n./hpc.sh worker-logs      # pantau tugas yang dikerjakan`}
-            />
-          </div>
+          {/* Menjalankan worker (repo worker) + token CLI */}
+          <WorkerSetupCard online={me.worker.online} notify={notify} />
         </div>
 
         {/* Job berjalan */}
@@ -297,7 +298,7 @@ export default function DashboardPage() {
                   </tr>
                 ))}
                 {!me.recent.length && (
-                  <tr><td colSpan={6} className="py-2 text-zinc-500">Belum ada tugas. Jalankan worker Anda dengan ./hpc.sh worker-up.</td></tr>
+                  <tr><td colSpan={6} className="py-2 text-zinc-500">Belum ada tugas. Jalankan worker Anda: ./hpc.sh up di folder repo worker.</td></tr>
                 )}
               </tbody>
             </table>
@@ -383,5 +384,43 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Akun lama (dibuat lewat CLI) belum punya password: buat sekali agar bisa login dengan email. */
+function PasswordCard({ notify, onDone }: { notify: (m: string, t?: "ok" | "err") => void; onDone: () => void }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pw.length < 8) return notify("Password minimal 8 karakter.", "err");
+    if (pw !== pw2) return notify("Konfirmasi password tidak cocok.", "err");
+    setBusy(true);
+    const r = await fetch("/api/volunteer/password", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) return notify(d.detail || "Password belum tersimpan.", "err");
+    notify(d.message || "Password tersimpan.");
+    onDone();
+  };
+  const input = "rounded border border-cyber-border bg-cyber-black px-3 py-1.5 text-xs text-white focus:border-cyber-amber focus:outline-none";
+  return (
+    <form onSubmit={save} className="cyber-box border-cyber-amber/60 p-4 space-y-2">
+      <div className="text-xs font-bold text-cyber-amber-bright">BUAT PASSWORD LOGIN WEBSITE</div>
+      <p className="text-[11px] text-zinc-400">
+        Akun Anda dibuat lewat CLI dan belum punya password. Buat sekarang supaya berikutnya cukup login dengan email +
+        password. Token worker tetap dipakai worker di terminal.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <input type="password" autoComplete="new-password" placeholder="password baru (min. 8)" value={pw} onChange={(e) => setPw(e.target.value)} className={input} />
+        <input type="password" autoComplete="new-password" placeholder="ulangi password" value={pw2} onChange={(e) => setPw2(e.target.value)} className={input} />
+        <button disabled={busy} className="rounded border border-cyber-amber bg-cyber-amber px-3 py-1.5 text-xs font-bold text-cyber-void disabled:opacity-50">
+          {busy ? "MENYIMPAN..." : "SIMPAN"}
+        </button>
+      </div>
+    </form>
   );
 }

@@ -8,6 +8,7 @@ disimpan ke .env (dengan persetujuan Anda).
 
 Hanya memakai pustaka standar Python 3.8+.
 """
+import getpass
 import json
 import os
 import sys
@@ -74,9 +75,19 @@ def main() -> int:
     print(f"Koordinator: {url}\n")
     name = ask("Nama worker (tampil di leaderboard)", env.get("WORKER_NAME", ""))
     gh = ask("Username GitHub")
-    email = ask("Email (untuk kode OTP)")
+    email = ask("Email (untuk kode OTP dan login website)")
+    while True:
+        pw = getpass.getpass("Password login website (min. 8 karakter, tidak tampil): ")
+        if len(pw) < 8:
+            print("Password minimal 8 karakter.")
+        elif pw != getpass.getpass("Ulangi password: "):
+            print("Password tidak sama, coba lagi.")
+        else:
+            break
 
-    r = post(url, "/api/auth/register-request", {"worker_name": name, "github_username": gh, "email": email})
+    # Password -> login website (dashboard). Token yang terbit setelah OTP -> worker di terminal.
+    r = post(url, "/api/auth/register-request",
+             {"worker_name": name, "github_username": gh, "email": email, "password": pw})
     print(f"\n{r['message']} (skor GitHub {r.get('github_score')})")
     if r.get("dev_mode"):
         print(f"[MODE DEV] SMTP belum diatur, OTP = {r['dev_otp']}")

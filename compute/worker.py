@@ -398,7 +398,8 @@ def main():
             print("ditolak koordinator:", e.code, body, flush=True)
             # Jika token dicabut / kadaluarsa, hentikan proses agar Docker dapat restart
             if e.code in (401, 403):
-                print("[auth] Token tidak valid. Hentikan worker — jalankan ulang setelah login.", flush=True)
+                print("[auth] Token ditolak. Lihat / buat token di dashboard relawan (kartu 'Token Worker "
+                      "untuk CLI'), lalu jalankan './hpc.sh setup' dan './hpc.sh up' lagi.", flush=True)
                 raise SystemExit(1)
             time.sleep(2)
 

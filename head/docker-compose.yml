@@ -56,6 +56,10 @@ services:
       PROJECT_WEBHOOK_SECRET: ${PROJECT_WEBHOOK_SECRET:-}
       PROJECT_POLL_SECONDS: ${PROJECT_POLL_SECONDS:-90}
       JOBDESK_MAX_ACTIVE: ${JOBDESK_MAX_ACTIVE:-1}
+      # Alamat koordinator untuk worker relawan (head-online menyimpannya otomatis; ini cadangan)
+      PUBLIC_COORDINATOR_URL: ${PUBLIC_COORDINATOR_URL:-}
+      # Login website relawan (email + password): umur sesi web (hari)
+      WORKER_SESSION_DAYS: ${WORKER_SESSION_DAYS:-7}
       REQUIRE_CI_PASS: ${REQUIRE_CI_PASS:-1}
       CI_REPLICAS: ${CI_REPLICAS:-2}
       CI_TIMEOUT_S: ${CI_TIMEOUT_S:-300}

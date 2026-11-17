@@ -15,6 +15,7 @@ Endpoint:
   GET  /api/me                       token worker individual (hpc_w_...)
   POST /api/me/certificate           token worker individual
   GET  /api/certificates/{code}      publik
+Endpoint relawan menerima sesi web (login email + password) maupun token worker pribadi.
 """
 import os
 import secrets
@@ -22,7 +23,8 @@ import secrets
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from common import db, check_worker_auth
+from common import db
+from volunteer_auth import check_volunteer_auth
 
 CERT_MIN_CREDITS = int(os.environ.get("CERT_MIN_CREDITS", "50") or 50)
 CERT_MAX_REJECT_PCT = float(os.environ.get("CERT_MAX_REJECT_PCT", "10") or 10)
@@ -116,7 +118,7 @@ def leaderboard(limit: int = 50):
 
 
 def _individual(authorization: str | None) -> dict:
-    info = check_worker_auth(authorization)
+    info = check_volunteer_auth(authorization)
     if info["type"] != "individual":
         raise HTTPException(403, "Token bersama (WORKER_TOKEN global) tidak punya profil relawan. "
                                  "Daftar dulu lewat halaman Register atau './hpc.sh worker-login'.")
@@ -145,11 +147,14 @@ def me(authorization: str = Header(None)):
             WHERE a.worker_id = %s ORDER BY a.id DESC LIMIT 25""", (w["id"],)).fetchall()
         cert = c.execute("SELECT code, issued_at, updated_at, credits FROM certificates WHERE worker_id = %s",
                          (w["id"],)).fetchone()
+        acc = c.execute("SELECT password_hash IS NOT NULL AS has_password FROM workers WHERE id = %s",
+                        (w["id"],)).fetchone()
     return {
         "worker": {"id": w["id"], "name": w["name"], "github_username": w["github_username"],
                    "email": w["email"], "status": w["status"], "created_at": s["created_at"],
                    "online": s["online"], "last_seen": s["last_seen"],
-                   "show_in_appreciation": bool(w.get("show_in_appreciation", False))},
+                   "show_in_appreciation": bool(w.get("show_in_appreciation", False)),
+                   "has_password": acc["has_password"]},
         "stats": {"credits": s["credits"], "rank": s["rank"], "of": len(ranked),
                   "badge": badge(s["credits"]), "next_badge": next_badge(s["credits"]),
                   "tasks_validated": s["tasks_validated"], "tasks_rejected": s["tasks_rejected"],

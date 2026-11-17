@@ -113,6 +113,35 @@ tanpa `hpc.json` setiap CI berstatus error. Isinya: build `python3 -m py_compile
 satu tugas test per file (`tests/test_montecarlo.py`, `tests/test_mandelbrot.py`,
 `tests/test_koordinator.py`, 12 test). Folder `contoh-repo-b/` tetap ada sebagai contoh lain.
 
+## Alur relawan: login website vs token CLI
+
+Relawan hanya perlu meng-clone **repo B** (repo worker). Repo B sekarang punya `hpc.sh` sendiri dan
+`worker.py` yang sama dengan `compute/worker.py` di repo A (semua jenis tugas, termasuk CI), jadi
+relawan tidak perlu meng-clone repo platform ini.
+
+| Kredensial | Dipakai | Keterangan |
+| --- | --- | --- |
+| Email + password | Website: dashboard, jobdesk, sertifikat | Dibuat saat Register. Login membuat sesi web `hpc_ws_...` (7 hari, `WORKER_SESSION_DAYS`) di cookie httpOnly. Sesi web **tidak bisa** mengambil tugas. |
+| Token worker `hpc_w_...` | CLI: worker di Docker (`/api/register`, `claim`, `heartbeat`, `submit`) | Disimpan di `.env` repo B lewat `./hpc.sh setup`. Bisa dilihat / dibuat ulang di dashboard. Tidak pernah disimpan di browser. |
+
+Token tetap perlu karena worker adalah program yang berjalan terus tanpa manusia: ia tidak bisa
+mengetik password, dan menaruh password di `.env` lebih berbahaya daripada token yang bisa dicabut
+dan dibuat ulang tanpa mengganti password. Sebaliknya, browser memakai password + sesi agar token
+tidak perlu ditempel ke website.
+
+Langkah relawan:
+
+```bash
+git clone https://github.com/ChanceClover/hpc-cloudservice-worker.git ~/hpc-cloudservice-worker
+cd ~/hpc-cloudservice-worker && chmod +x hpc.sh
+./hpc.sh setup <COORDINATOR_URL> <WORKER_TOKEN>   # perintah lengkap disalin dari dashboard
+./hpc.sh up
+./hpc.sh logs
+```
+
+`./hpc.sh head-online` menyimpan alamat HTTPS koordinator (`POST /api/admin/public-url`), sehingga
+dashboard relawan menampilkan perintah `setup` yang sudah berisi alamat itu.
+
 ## Cara memasang
 
 1. **Siapkan repo B** di GitHub (publik). Pastikan `hpc.json` dan folder `tests/` sudah ada di `main`
@@ -120,7 +149,7 @@ satu tugas test per file (`tests/test_montecarlo.py`, `tests/test_mandelbrot.py`
 2. **Isi `.env` head node:**
    ```
    PROJECT_REPO_URL=https://github.com/ChanceClover/hpc-cloudservice-worker
-   PROJECT_APP_NAME=HPC Cloud Service Worker
+   PROJECT_APP_NAME="HPC Cloud Service Worker"
    PROJECT_POLL_SECONDS=90
    ```
 3. **(Disarankan) Token repo B.** Buat *fine-grained personal access token* khusus repo B
@@ -147,7 +176,9 @@ satu tugas test per file (`tests/test_montecarlo.py`, `tests/test_mandelbrot.py`
 ```
 
 API: `GET /api/project` (publik), `GET /api/me/jobdesk`, `POST /api/me/jobdesk/<id>/submit`
-(token relawan), `GET|POST /api/admin/jobdesks`, `POST /api/admin/jobdesks/<id>/action`,
+(sesi web relawan atau token relawan), `POST /api/auth/login`, `POST /api/auth/logout`,
+`GET /api/auth/session`, `POST /api/me/password`, `GET /api/me/cli-token`,
+`POST /api/me/cli-token/rotate` (sesi web), `POST /api/admin/public-url`, `GET|POST /api/admin/jobdesks`, `POST /api/admin/jobdesks/<id>/action`,
 `GET|POST /api/admin/ci`, `GET /api/admin/ci/<job>/log` (admin), `POST /api/webhooks/github`.
 
 ## Keamanan
@@ -166,7 +197,9 @@ API: `GET /api/project` (publik), `GET /api/me/jobdesk`, `POST /api/me/jobdesk/<
 ## Batasan saat ini
 
 - Runtime compute node hanya Python 3.12 + git. Bila repo B memakai Node.js/Java, tambahkan
-  paketnya di `compute/Dockerfile`.
+  paketnya di `compute/Dockerfile` (repo A) dan `Dockerfile` (repo B).
+- `worker.py` ada di dua tempat (repo A `compute/worker.py` untuk laptop head node, repo B
+  `worker.py` untuk relawan). Bila salah satunya diubah, samakan yang lain.
 - Test di repo B harus deterministik. Test yang hasilnya berubah-ubah (mis. bergantung waktu
   atau jaringan) akan dianggap tidak sepakat antar-replika dan ditandai error.
 - `/tmp` worker 128 MB: cukup untuk repo kecil-menengah, tidak untuk repo dengan `node_modules` besar.

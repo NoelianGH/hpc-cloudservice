@@ -1,8 +1,18 @@
 import { NextResponse } from "next/server";
-import { WORKER_COOKIE } from "@/lib/volunteer";
+import { cookies } from "next/headers";
+import { coordinatorFetch, sameOrigin } from "@/lib/admin";
+import { WORKER_COOKIE, clearWorkerCookie } from "@/lib/volunteer";
 
-export async function POST() {
+export const dynamic = "force-dynamic";
+
+/** Logout: sesi dihapus di koordinator (tidak bisa dipakai lagi) dan cookie dibersihkan. */
+export async function POST(req: Request) {
+  if (!sameOrigin(req)) {
+    return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
+  }
+  const session = cookies().get(WORKER_COOKIE)?.value;
+  if (session) await coordinatorFetch("/api/auth/logout", { method: "POST", token: session });
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(WORKER_COOKIE, "", { httpOnly: true, sameSite: "strict", path: "/", maxAge: 0 });
+  clearWorkerCookie(res);
   return res;
 }

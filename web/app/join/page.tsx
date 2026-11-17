@@ -6,15 +6,15 @@ export const metadata = { title: "Gabung Jadi Relawan • IdleScale Cloud" };
 const STEPS = [
   {
     t: "Daftar Akun & Dapatkan Token (5 Menit)",
-    d: "Isi nama worker, username GitHub, dan email di halaman pendaftaran. Koordinator memeriksa keaslian akun GitHub Anda (umur akun ≥ 30 hari, minimal 2 repo publik) lalu mengirim kode OTP ke email. Setelah OTP terverifikasi, Anda langsung memperoleh WORKER_TOKEN pribadi.",
+    d: "Isi nama worker, username GitHub, email, dan password di halaman pendaftaran. Koordinator memeriksa keaslian akun GitHub Anda (umur akun ≥ 30 hari, minimal 2 repo publik) lalu mengirim kode OTP ke email. Setelah OTP terverifikasi Anda punya dua kredensial: email + password untuk login website (dashboard), dan WORKER_TOKEN pribadi untuk worker di terminal (CLI).",
   },
   {
     t: "Konfigurasi Lingkungan (Hanya Sekali)",
-    d: "Siapkan laptop Windows 10/11 dengan WSL2 (Ubuntu) dan Docker Desktop (aktifkan WSL Integration), atau sistem operasi Linux. Clone repositori proyek ke WSL, lalu masukkan WORKER_TOKEN, WORKER_ID, dan COORDINATOR_URL ke dalam file .env.",
+    d: "Siapkan laptop Windows 10/11 dengan WSL2 (Ubuntu) dan Docker Desktop (aktifkan WSL Integration), atau Linux. Clone REPO WORKER (repo yang juga Anda kerjakan lewat jobdesk) ke WSL, lalu jalankan ./hpc.sh setup dengan alamat koordinator dan WORKER_TOKEN Anda. Perintah lengkapnya (sudah berisi alamat koordinator) ada di dashboard.",
   },
   {
     t: "Nyalakan Worker Sandbox",
-    d: "Perintah ./hpc.sh worker-up menjalankan kontainer sandbox yang terisolasi aman. Worker akan otomatis menarik tugas komputasi kecil (di bawah 15 detik), menghitung, dan mengirim hasilnya kembali. Anda bisa mematikannya kapan saja tanpa merusak sistem.",
+    d: "Perintah ./hpc.sh up di folder repo worker menjalankan kontainer sandbox yang terisolasi aman. Worker akan otomatis menarik tugas komputasi kecil (di bawah 15 detik), menghitung, dan mengirim hasilnya kembali. Anda bisa mematikannya kapan saja tanpa merusak sistem.",
   },
   {
     t: "Kumpulkan Kredit & Lencana",
@@ -117,7 +117,7 @@ export default function JoinPage() {
         <div className="mt-6">
           <TerminalCode
             title="Terminal • Perintah Eksekusi di WSL2 / Linux"
-            code={`git clone https://github.com/NoelianGH/hpc-cloudservice.git ~/hpc-cloudservice\ncd ~/hpc-cloudservice && chmod +x hpc.sh\n./hpc.sh worker-login     # atau gunakan token dari halaman web register\n./hpc.sh worker-up 1\n./hpc.sh worker-logs`}
+            code={`# di Ubuntu WSL2, setelah Register + OTP\ngit clone https://github.com/ChanceClover/hpc-cloudservice-worker.git ~/hpc-cloudservice-worker\ncd ~/hpc-cloudservice-worker && chmod +x hpc.sh\n./hpc.sh setup <COORDINATOR_URL> <WORKER_TOKEN>   # salin dari dashboard\n./hpc.sh up\n./hpc.sh logs`}
           />
         </div>
       </div>

@@ -1,43 +1,59 @@
 import { NextResponse } from "next/server";
-import { coordinatorFetch, isHttps, sameOrigin } from "@/lib/admin";
-import { WORKER_COOKIE, WORKER_COOKIE_MAX_AGE } from "@/lib/volunteer";
+import { coordinatorFetch, sameOrigin } from "@/lib/admin";
+import { setWorkerCookie } from "@/lib/volunteer";
 
 export const dynamic = "force-dynamic";
 
-/** Login relawan dengan WORKER_TOKEN: token DICEK ke koordinator sebelum sesi dibuat. */
+/**
+ * Login website relawan.
+ *   { email, password }  cara utama
+ *   { token }            sekali saja, untuk akun lama dari './hpc.sh worker-login' yang belum punya password
+ * Koordinator mengembalikan token SESI web (bukan token worker); hanya sesi itu yang masuk cookie.
+ */
 export async function POST(req: Request) {
   if (!sameOrigin(req)) {
     return NextResponse.json({ detail: "Origin tidak diizinkan." }, { status: 403 });
   }
-  let token = "";
+  let body: any = {};
   try {
-    token = String((await req.json()).token || "").trim();
+    body = await req.json();
   } catch {
     /* body kosong */
   }
-  if (!/^hpc_w_[A-Za-z0-9]{16,64}$/.test(token)) {
+  const email = String(body.email || "").trim();
+  const password = String(body.password || "");
+  const token = String(body.token || "").trim();
+
+  let payload: Record<string, string>;
+  if (token) {
+    if (!/^hpc_w_[A-Za-z0-9]{16,64}$/.test(token)) {
+      return NextResponse.json({ detail: "Format token tidak valid. Token worker diawali 'hpc_w_'." }, { status: 400 });
+    }
+    payload = { token };
+  } else {
+    if (!email || !password) {
+      return NextResponse.json({ detail: "Email dan password wajib diisi." }, { status: 400 });
+    }
+    payload = { email, password };
+  }
+
+  const { status, data } = await coordinatorFetch("/api/auth/login", { method: "POST", body: payload });
+  if (status === 404) {
+    // Koordinator yang berjalan belum memuat modul login web (image Docker lama)
     return NextResponse.json(
-      { detail: "Format token tidak valid. Token relawan diawali 'hpc_w_' (didapat dari Register atau ./hpc.sh worker-login)." },
-      { status: 400 }
+      { detail: "Koordinator masih versi lama (belum ada login web). Jalankan './hpc.sh head-up' lalu coba lagi." },
+      { status: 503 }
     );
   }
-  const { status, data } = await coordinatorFetch("/api/auth/me", { token });
-  if (status !== 200 || data?.type !== "individual") {
-    const detail =
-      status === 403
-        ? data?.detail || "Worker ditangguhkan admin."
-        : status === 502
-          ? data?.detail
-          : "Token tidak dikenal koordinator atau sudah dicabut. Daftar ulang / jalankan ./hpc.sh worker-login.";
-    return NextResponse.json({ detail }, { status: status === 502 ? 502 : 401 });
+  if (status !== 200 || !data?.session) {
+    return NextResponse.json({ detail: data?.detail || "Login ditolak koordinator." }, { status: status === 200 ? 502 : status });
   }
-  const res = NextResponse.json({ ok: true, worker: data });
-  res.cookies.set(WORKER_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: isHttps(req),
-    path: "/",
-    maxAge: WORKER_COOKIE_MAX_AGE,
+  const res = NextResponse.json({
+    ok: true,
+    worker_name: data.worker_name,
+    github_username: data.github_username,
+    has_password: data.has_password,
   });
+  setWorkerCookie(res, req, data.session);
   return res;
 }

@@ -137,6 +137,30 @@ STATEMENTS = [
     "ALTER TABLE repo_pushes ADD COLUMN IF NOT EXISTS check_note TEXT",
     "ALTER TABLE repo_pushes ADD COLUMN IF NOT EXISTS checked BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE repo_pushes ALTER COLUMN checked SET DEFAULT FALSE",
+
+    # ---- Login web relawan: email + password (sesi web), token tetap untuk CLI/worker ----
+    # Hash password (PBKDF2, format sama dengan admin). Dibuat saat Register (web) atau di dashboard.
+    "ALTER TABLE workers ADD COLUMN IF NOT EXISTS password_hash TEXT",
+    "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS password_hash TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_workers_email ON workers (lower(email))",
+    # Nama tampilan pilihan relawan (PREFERRED USERNAME di Register), tampil di navbar saat login
+    "ALTER TABLE workers ADD COLUMN IF NOT EXISTS username TEXT",
+    "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS username TEXT",
+    # Sesi web relawan: hanya HASH token sesi yang disimpan; token worker (CLI) tidak pernah ke browser.
+    """CREATE TABLE IF NOT EXISTS worker_sessions (
+        token_hash   TEXT PRIMARY KEY,
+        worker_id    TEXT NOT NULL REFERENCES workers(id),
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at   TIMESTAMPTZ NOT NULL,
+        last_used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        ip           TEXT,
+        user_agent   TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_worker_sessions_worker ON worker_sessions (worker_id)",
+    # Pengaturan yang berubah saat berjalan, mis. alamat HTTPS koordinator dari './hpc.sh head-online'
+    """CREATE TABLE IF NOT EXISTS settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
 ]
 
 

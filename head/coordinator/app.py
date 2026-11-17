@@ -1,4 +1,5 @@
 import hmac
+import re
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -15,6 +16,8 @@ from common import db, check_worker_auth, check_worker_owner
 from schema import migrate
 from jobs import JobError, canonical_hash, create_job, heatmap_png
 from volunteer import router as volunteer_router
+from volunteer_auth import router as volunteer_auth_router, check_password_rule
+from admin_auth import hash_password
 from project import router as project_router
 from watch import router as watch_router
 
@@ -43,6 +46,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="HPC Coordinator", lifespan=lifespan)
 app.include_router(admin_router)
 app.include_router(volunteer_router)
+app.include_router(volunteer_auth_router)
 app.include_router(project_router)
 app.include_router(watch_router)
 
@@ -66,6 +70,11 @@ class AuthRegisterRequest(BaseModel):
     worker_name: str
     github_username: str
     email: str
+    # Password login WEBSITE (wajib dari halaman Register; boleh kosong dari CLI lama,
+    # lalu dibuat belakangan di dashboard). Disimpan sebagai hash PBKDF2, tidak pernah teks asli.
+    password: str | None = None
+    # PREFERRED USERNAME dari halaman Register (nama tampilan di navbar). Kosong = pakai username GitHub.
+    username: str | None = None
 
 class AuthVerifyRequest(BaseModel):
     session_id: str
@@ -89,6 +98,18 @@ def auth_register_request(body: AuthRegisterRequest):
         raise HTTPException(400, "worker_name, github_username, dan email wajib diisi.")
     if "@" not in email or "." not in email:
         raise HTTPException(400, "Format alamat email tidak valid.")
+    username = re.sub(r"[^A-Za-z0-9_.-]", "", (body.username or "").strip())[:30] or None
+    password_hash = None
+    if body.password:
+        check_password_rule(body.password)
+        password_hash = hash_password(body.password)
+    # Satu email = satu akun relawan (email dipakai untuk login website)
+    with db() as c:
+        taken = c.execute("""SELECT 1 FROM workers WHERE lower(email) = lower(%s)
+                               AND lower(coalesce(github_username, '')) <> lower(%s) LIMIT 1""",
+                          (email, github_user)).fetchone()
+    if taken:
+        raise HTTPException(400, "Email ini sudah dipakai akun relawan lain. Gunakan email lain atau login.")
 
     # 1. Pengecekan Reputasi GitHub (Anti-Fake Worker)
     gh_check = check_github_worker(github_user)
@@ -113,8 +134,9 @@ def auth_register_request(body: AuthRegisterRequest):
             with db() as c:
                 c.execute("""
                     INSERT INTO worker_auth_sessions 
-                        (session_id, worker_name, github_username, email, otp, otp_expires_at, github_metrics)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        (session_id, worker_name, github_username, email, otp, otp_expires_at, github_metrics,
+                         password_hash, username)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     session_id,
                     worker_name,
@@ -122,7 +144,9 @@ def auth_register_request(body: AuthRegisterRequest):
                     email,
                     otp,
                     expires_at,
-                    Jsonb(gh_check["factors"])
+                    Jsonb(gh_check["factors"]),
+                    password_hash,
+                    username,
                 ))
             break
         except Exception as e:
@@ -210,17 +234,21 @@ def auth_verify_otp(body: AuthVerifyRequest):
 
         if existing_worker:
             wid = existing_worker["id"]
+            # Password lama dipertahankan bila daftar ulang lewat CLI (tanpa password)
             c.execute("""
                 UPDATE workers 
-                SET name = %s, email = %s, auth_token = %s, status = 'active', last_seen = now()
+                SET name = %s, email = %s, auth_token = %s, status = 'active', last_seen = now(),
+                    password_hash = coalesce(%s, password_hash), username = coalesce(%s, username)
                 WHERE id = %s
-            """, (session["worker_name"], session["email"], worker_token, wid))
+            """, (session["worker_name"], session["email"], worker_token, session.get("password_hash"),
+                  session.get("username"), wid))
         else:
             wid = f"w-{uuid.uuid4().hex[:8]}"
             c.execute("""
-                INSERT INTO workers (id, name, github_username, email, auth_token, status)
-                VALUES (%s, %s, %s, %s, %s, 'active')
-            """, (wid, session["worker_name"], session["github_username"], session["email"], worker_token))
+                INSERT INTO workers (id, name, github_username, email, auth_token, status, password_hash, username)
+                VALUES (%s, %s, %s, %s, %s, 'active', %s, %s)
+            """, (wid, session["worker_name"], session["github_username"], session["email"], worker_token,
+                  session.get("password_hash"), session.get("username")))
 
     return {
         "status": "authenticated",

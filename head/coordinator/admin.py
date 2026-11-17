@@ -274,7 +274,7 @@ def list_workers(authorization: str = Header(None)):
 
 @router.post("/workers/{worker_id}/revoke-token")
 def revoke_worker_token(worker_id: str, authorization: str = Header(None)):
-    """Cabut token individual worker: worker harus login ulang (./hpc.sh worker-login)."""
+    """Cabut token individual worker: relawan membuat token baru di dashboard (login website tetap bisa)."""
     s = require_admin_session(authorization)
     with db() as c:
         r = c.execute("UPDATE workers SET auth_token = NULL WHERE id = %s RETURNING id, name",

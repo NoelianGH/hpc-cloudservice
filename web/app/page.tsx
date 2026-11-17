@@ -137,19 +137,19 @@ export default function HomePage() {
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div>
               <p className="text-xs text-zinc-300 font-medium mb-1">
-                1. Clone repositori ke lingkungan WSL2 / Linux Anda:
+                1. Clone repo worker ke Ubuntu WSL2 / Linux Anda (repo ini juga tempat Anda mengerjakan jobdesk):
               </p>
               <TerminalCode
-                title="Terminal • Langkah 1: Clone Repositori"
-                code={`git clone https://github.com/NoelianGH/hpc-cloudservice.git\ncd hpc-cloudservice\nchmod +x hpc.sh`}
+                title="Terminal • Langkah 1: Clone Repo Worker"
+                code={`git clone https://github.com/ChanceClover/hpc-cloudservice-worker.git\ncd hpc-cloudservice-worker\nchmod +x hpc.sh`}
               />
 
               <p className="mt-5 text-xs text-zinc-300 font-medium mb-1">
-                2. Autentikasi node worker via CLI (atau gunakan token dari web):
+                2. Register di website, lalu simpan alamat koordinator + token worker (perintah lengkap ada di dashboard):
               </p>
               <TerminalCode
-                title="Terminal • Langkah 2: Login Worker"
-                code={`./hpc.sh worker-login`}
+                title="Terminal • Langkah 2: Setup Token Worker"
+                code={`./hpc.sh setup <COORDINATOR_URL> <WORKER_TOKEN>`}
               />
             </div>
 
@@ -159,7 +159,7 @@ export default function HomePage() {
               </p>
               <TerminalCode
                 title="Terminal • Langkah 3: Eksekusi Worker"
-                code={`# Jalankan 2 worker sandbox terisolasi\n./hpc.sh worker-up 2\n\n# Pantau log eksekusi secara real-time\n./hpc.sh worker-logs`}
+                code={`# Jalankan worker sandbox terisolasi (angka = jumlah worker)\n./hpc.sh up 1\n\n# Pantau log eksekusi secara real-time\n./hpc.sh logs`}
               />
 
               <div className="mt-5 rounded-md border border-cyber-amber/30 bg-cyber-amber-darkest/30 p-3.5 text-xs text-amber-200">

@@ -138,7 +138,7 @@ export default function JobdeskCard() {
         <div className="space-y-1 text-[11px] text-zinc-400">
           {!d.online && (
             <p className="rounded border border-cyber-amber-deep bg-cyber-amber-darkest/40 p-2 text-cyber-amber-bright">
-              Compute node Anda OFFLINE. Jalankan <code>./hpc.sh worker-up</code>.{" "}
+              Compute node Anda OFFLINE. Jalankan <code>./hpc.sh up</code> di folder repo worker (lihat kartu &quot;Jalankan Worker Anda&quot;).{" "}
               {d.active.length
                 ? "Jobdesk Anda tetap milik Anda; tugas komputasi yang sedang dikerjakan node Anda otomatis dipindah ke compute node lain."
                 : "Jobdesk baru hanya di-assign ke relawan yang compute node-nya online."}

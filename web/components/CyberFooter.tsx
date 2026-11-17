@@ -45,10 +45,10 @@ export default function CyberFooter() {
               Perintah CLI
             </h4>
             <ul className="space-y-1.5 text-xs font-mono">
-              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh head-up</code></li>
-              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh worker-login</code></li>
-              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh worker-up 2</code></li>
-              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh stats</code></li>
+              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh setup</code></li>
+              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh up</code></li>
+              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh logs</code></li>
+              <li><code className="text-cyber-amber-light hover:underline">./hpc.sh status</code></li>
             </ul>
           </div>
 

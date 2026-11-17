@@ -8,6 +8,10 @@ export default function CyberNavbar() {
   const [clusterOnline, setClusterOnline] = useState<boolean | null>(null);
   const [activeNodes, setActiveNodes] = useState<number>(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Relawan yang sedang login (sesi web): ganti tombol REGISTER/LOGIN dengan avatar + username
+  const [user, setUser] = useState<{ username: string; github_username: string } | null>(null);
+  // Admin yang sedang login (sesi admin): tampil sebagai "ADMIN" tanpa foto profil
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     fetch("/api/stats")
@@ -18,6 +22,22 @@ export default function CyberNavbar() {
       })
       .catch(() => setClusterOnline(false));
   }, []);
+
+  // Cek sesi setiap pindah halaman (mis. setelah login / logout)
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/volunteer/session", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (alive) setUser(data.logged_in ? { username: data.username, github_username: data.github_username } : null);
+      })
+      .catch(() => {});
+    fetch("/api/admin/session", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => { if (alive) setIsAdmin(Boolean(data.logged_in)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [pathname]);
 
   // Tutup menu mobile otomatis saat berpindah halaman
   useEffect(() => {
@@ -149,7 +169,13 @@ export default function CyberNavbar() {
               </span>
             </div>
 
-            {/* Desktop Auth Buttons: REGISTER & LOGIN di Ujung Kanan */}
+            {/* Desktop: chip ADMIN dan/atau avatar + username saat login, REGISTER & LOGIN bila belum */}
+            {user || isAdmin ? (
+              <div className="hidden md:flex items-center gap-2">
+                {isAdmin && <AdminChip active={pathname.startsWith("/admin")} />}
+                {user && <UserChip user={user} active={pathname === "/dashboard"} />}
+              </div>
+            ) : (
             <div className="hidden md:flex items-center space-x-2">
               <Link
                 href="/register"
@@ -170,6 +196,7 @@ export default function CyberNavbar() {
                 LOGIN
               </Link>
             </div>
+            )}
 
             {/* Tombol Hamburger 3 Garis (Muncul saat layar mengecil / diminimize < md) */}
             <button
@@ -281,6 +308,12 @@ export default function CyberNavbar() {
               <span className="block font-mono text-[10px] text-zinc-500 uppercase tracking-wider">
                 PORTAL ACCESS
               </span>
+              {user || isAdmin ? (
+                <div className="space-y-2">
+                  {isAdmin && <AdminChip active={pathname.startsWith("/admin")} wide />}
+                  {user && <UserChip user={user} active={pathname === "/dashboard"} wide />}
+                </div>
+              ) : (
               <div className="grid grid-cols-2 gap-2">
                 <Link
                   href="/register"
@@ -301,6 +334,7 @@ export default function CyberNavbar() {
                   LOGIN
                 </Link>
               </div>
+              )}
 
               <p className="text-center font-mono text-[9px] text-zinc-500 pt-2">
                 IdleScale Network • Distributed Volunteer Supercomputing
@@ -310,5 +344,66 @@ export default function CyberNavbar() {
         </div>
       )}
     </>
+  );
+}
+
+/** Tampilan user di kanan atas: foto profil GitHub + preferred username, menuju dashboard. */
+function UserChip({
+  user,
+  active,
+  wide = false,
+}: {
+  user: { username: string; github_username: string };
+  active: boolean;
+  wide?: boolean;
+}) {
+  const [imgOk, setImgOk] = useState(true);
+  const initial = (user.username || "?").charAt(0).toUpperCase();
+  return (
+    <Link
+      href="/dashboard"
+      title={`@${user.github_username} · buka dashboard`}
+      className={`group flex items-center gap-2.5 rounded border px-2 py-1 transition-all ${wide ? "w-full py-2" : ""} ${active
+        ? "border-cyber-amber bg-cyber-surface shadow-amber-glow-sm"
+        : "border-cyber-border bg-cyber-surface/60 hover:border-cyber-amber/60 hover:bg-cyber-surface"
+        }`}
+    >
+      {imgOk && user.github_username ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`https://github.com/${encodeURIComponent(user.github_username)}.png?size=64`}
+          alt=""
+          width={28}
+          height={28}
+          onError={() => setImgOk(false)}
+          className="h-7 w-7 rounded-full border border-cyber-amber/60 bg-cyber-black object-cover"
+        />
+      ) : (
+        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-cyber-amber/60 bg-cyber-black font-mono text-xs font-bold text-cyber-amber-bright">
+          {initial}
+        </span>
+      )}
+      <span className="max-w-[10rem] truncate font-mono text-xs font-semibold tracking-wide text-zinc-100 group-hover:text-cyber-amber-bright">
+        {user.username}
+      </span>
+    </Link>
+  );
+}
+
+/** Tampilan admin di kanan atas: gaya sama dengan chip relawan, tulisan "ADMIN", tanpa foto. */
+function AdminChip({ active, wide = false }: { active: boolean; wide?: boolean }) {
+  return (
+    <Link
+      href="/admin"
+      title="Dashboard admin"
+      className={`group flex items-center rounded border px-3.5 py-1 transition-all ${wide ? "w-full py-2" : ""} ${active
+        ? "border-cyber-amber bg-cyber-surface shadow-amber-glow-sm"
+        : "border-cyber-border bg-cyber-surface/60 hover:border-cyber-amber/60 hover:bg-cyber-surface"
+        }`}
+    >
+      <span className="flex h-7 items-center font-mono text-xs font-semibold tracking-widest text-zinc-100 group-hover:text-cyber-amber-bright">
+        ADMIN
+      </span>
+    </Link>
   );
 }

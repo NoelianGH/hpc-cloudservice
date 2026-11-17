@@ -19,8 +19,12 @@ case "$1" in
   # ---- Head node ----
   head-up)      $HEAD up -d --build; $HEAD ps; echo "Dashboard: http://localhost:8000" ;;
   head-online)  $HEAD --profile online up -d; sleep 8
-                echo "Alamat HTTPS untuk relawan (isi ke COORDINATOR_URL):"
-                $HEAD logs tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1 ;;
+                URL=$($HEAD logs tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
+                echo "Alamat HTTPS untuk relawan (COORDINATOR_URL di repo worker): ${URL:-(belum muncul, ulangi perintah ini)}"
+                # Simpan ke koordinator agar dashboard relawan menampilkan perintah setup yang tepat
+                [ -n "$URL" ] && curl -s -o /dev/null -X POST http://localhost:8000/api/admin/public-url \
+                  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+                  -d "{\"url\":\"$URL\"}" && echo "(tersimpan; tampil di dashboard relawan)" || true ;;
   head-down)    $HEAD --profile online down ;;
   head-reset)   $HEAD --profile online down -v; echo "Database dihapus." ;;
   head-logs)    $HEAD logs -f --tail 50 ${2:-} ;;

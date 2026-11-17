@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import TerminalCode from "@/components/TerminalCode";
@@ -43,6 +43,15 @@ export default function RegisterPage() {
     worker_token: string;
   } | null>(null);
 
+  // Repo worker + alamat koordinator untuk instruksi setelah verifikasi
+  const [project, setProject] = useState<{ repo_url: string | null; coordinator_url: string | null } | null>(null);
+  useEffect(() => {
+    fetch("/api/project", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setProject(d.project || null))
+      .catch(() => setProject(null));
+  }, []);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
@@ -60,7 +69,12 @@ export default function RegisterPage() {
       setErrorMsg("Alamat email tidak valid.");
       return;
     }
-    if (formData.password && formData.password !== formData.confirmPassword) {
+    // Password = login WEBSITE (dashboard). Token worker yang terbit setelah OTP = untuk CLI.
+    if (formData.password.length < 8) {
+      setErrorMsg("Password minimal 8 karakter (dipakai untuk login website).");
+      return;
+    }
+    if (formData.password !== formData.confirmPassword) {
       setErrorMsg("Konfirmasi password tidak cocok.");
       return;
     }
@@ -76,6 +90,7 @@ export default function RegisterPage() {
           lastName: formData.lastName,
           username: formData.username || formData.email.split("@")[0],
           email: formData.email,
+          password: formData.password,
           githubUsername: formData.githubUsername.trim(),
           workerName: formData.workerName.trim() || `worker-${formData.githubUsername.trim().toLowerCase()}`,
         }),
@@ -151,12 +166,12 @@ export default function RegisterPage() {
         worker_token: data.worker_token,
       });
 
-      // Langsung login ke dashboard relawan: token disimpan di cookie httpOnly oleh server
-      // (bukan localStorage), lalu divalidasi koordinator di setiap request.
+      // Langsung login website dengan email + password yang baru dibuat. Server menyimpan
+      // SESI web di cookie httpOnly; token worker tidak pernah masuk cookie (khusus CLI).
       await fetch("/api/volunteer/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: data.worker_token }),
+        body: JSON.stringify({ email: formData.email.trim(), password: formData.password }),
       }).catch(() => undefined);
 
       setStep(3);
@@ -372,11 +387,14 @@ export default function RegisterPage() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pt-2">
                 <div>
                   <label className="block font-mono text-[11px] text-zinc-300">
-                    PASSWORD
+                    PASSWORD LOGIN WEBSITE *
                   </label>
                   <input
                     type="password"
                     name="password"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
                     value={formData.password}
                     onChange={handleInputChange}
                     placeholder="••••••••••••"
@@ -391,6 +409,8 @@ export default function RegisterPage() {
                   <input
                     type="password"
                     name="confirmPassword"
+                    required
+                    autoComplete="new-password"
                     value={formData.confirmPassword}
                     onChange={handleInputChange}
                     placeholder="••••••••••••"
@@ -398,6 +418,11 @@ export default function RegisterPage() {
                   />
                 </div>
               </div>
+
+              <p className="font-mono text-[10px] leading-relaxed text-zinc-500">
+                Email + password dipakai untuk masuk ke website (dashboard). Setelah OTP, Anda juga mendapat{" "}
+                <span className="text-zinc-300">token worker</span> untuk menjalankan worker dari terminal (CLI).
+              </p>
 
               <button
                 type="submit"
@@ -557,16 +582,20 @@ export default function RegisterPage() {
             {/* Execution instructions */}
             <div className="mt-6">
               <h4 className="font-mono text-xs font-bold text-cyber-amber-bright uppercase tracking-wider">
-                Jalankan Node Komputasi Anda
+                Jalankan Compute Node dari Repo Worker
               </h4>
               <p className="mt-1 font-mono text-xs text-zinc-400">
-                Clone repo dan jalankan kontainer worker dengan token terverifikasi Anda:
+                Worker dijalankan dari <strong>repo worker</strong> (repo yang juga Anda kerjakan lewat jobdesk), bukan
+                dari repo platform. Jalankan di Ubuntu WSL2 dengan Docker Desktop menyala.
               </p>
 
               <TerminalCode
-                title="Terminal • Eksekusi Worker di WSL2 / Linux"
-                code={`# 1. Masuk ke folder proyek dan tarik pembaruan\ncd ~/hpc-cloudservice && git pull\n\n# 2. Masukkan token Anda ke file .env\necho "WORKER_TOKEN=${verifiedWorker.worker_token}" >> .env\necho "WORKER_ID=${verifiedWorker.worker_id}" >> .env\necho "WORKER_NAME=${verifiedWorker.worker_name}" >> .env\n\n# 3. Jalankan worker sandbox dalam Docker\n./hpc.sh worker-up 1\n\n# 4. Pantau komputasi Anda secara realtime\n./hpc.sh worker-logs`}
+                title="Terminal • Ubuntu WSL2"
+                code={workerSteps(project?.repo_url, project?.coordinator_url, verifiedWorker.worker_token)}
               />
+              <p className="mt-1 font-mono text-[10px] text-zinc-500">
+                Lupa token? Lihat atau buat token baru kapan saja di dashboard (kartu &quot;Token Worker untuk CLI&quot;).
+              </p>
             </div>
 
             {/* Action buttons */}
@@ -586,3 +615,21 @@ export default function RegisterPage() {
   );
 }
 
+
+/** Langkah menjalankan worker dari repo worker (sama dengan yang tampil di dashboard). */
+function workerSteps(repoUrl: string | null | undefined, coordUrl: string | null | undefined, token: string) {
+  const repo = (repoUrl || "https://github.com/ChanceClover/hpc-cloudservice-worker").replace(/\/$/, "");
+  const dir = repo.split("/").pop();
+  return [
+    "# 1. Clone repo worker (sekali saja)",
+    `git clone ${repo}.git ~/${dir}`,
+    `cd ~/${dir} && chmod +x hpc.sh`,
+    "",
+    "# 2. Simpan alamat koordinator + token worker Anda ke .env",
+    `./hpc.sh setup ${coordUrl || "<COORDINATOR_URL dari admin>"} ${token}`,
+    "",
+    "# 3. Nyalakan worker, lalu pantau tugasnya",
+    "./hpc.sh up",
+    "./hpc.sh logs",
+  ].join("\n");
+}

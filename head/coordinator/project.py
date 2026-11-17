@@ -46,7 +46,8 @@ from pydantic import BaseModel
 from psycopg.types.json import Jsonb
 
 from admin import get_admin_session
-from common import db, check_worker_auth
+from common import db
+from volunteer_auth import check_volunteer_auth
 from jobs import JobError, create_job
 from publisher import _api, parse_repo, PublishError
 import watch
@@ -66,6 +67,9 @@ CI_RESOURCES = {"cpus": float(os.environ.get("CI_CPUS", "1") or 1),
                 "memory_mb": int(os.environ.get("CI_MEMORY_MB", "512") or 512),
                 "timeout_s": int(os.environ.get("CI_TIMEOUT_S", "300") or 300)}
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+# Alamat koordinator yang dipakai worker relawan (diisi otomatis oleh './hpc.sh head-online',
+# atau tetap lewat .env bila koordinator punya domain sendiri)
+PUBLIC_COORDINATOR_URL = os.environ.get("PUBLIC_COORDINATOR_URL", "").strip().rstrip("/")
 STATUS_CONTEXT = "hpc-cloudservice/ci"
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -321,9 +325,9 @@ def _admin(auth: str | None) -> str:
 
 
 def _volunteer(auth: str | None) -> dict:
-    info = check_worker_auth(auth)
+    info = check_volunteer_auth(auth)
     if info["type"] != "individual":
-        raise HTTPException(403, "Butuh token pribadi relawan (hpc_w_...), bukan token global.")
+        raise HTTPException(403, "Butuh login relawan (website) atau token pribadi (hpc_w_...), bukan token global.")
     return info["worker"]
 
 
@@ -346,8 +350,21 @@ _JD_SQL = """
 """
 
 
+def coordinator_url() -> str | None:
+    """Alamat koordinator untuk COORDINATOR_URL di .env repo worker relawan."""
+    try:
+        with db() as c:
+            r = c.execute("SELECT value FROM settings WHERE key = 'public_coordinator_url'").fetchone()
+        if r:
+            return r["value"]
+    except Exception:
+        pass
+    return PUBLIC_COORDINATOR_URL or None
+
+
 def project_info() -> dict:
     return {"enabled": enabled(), "repo_url": PROJECT_REPO_URL or None, "app_name": PROJECT_APP_NAME,
+            "coordinator_url": coordinator_url(),
             "default_branch": DEFAULT_BRANCH, "branch_prefix": BRANCH_PREFIX,
             "github_token": bool(GIT_TOKEN), "webhook": bool(WEBHOOK_SECRET),
             "poll_seconds": POLL_SECONDS, "require_ci_pass": REQUIRE_CI_PASS,
@@ -401,7 +418,7 @@ def public_project():
             "SELECT status, count(*) AS n FROM jobdesks GROUP BY status").fetchall()}
         ci = _ci_rows(c, limit=10)
     info = project_info()
-    return {"project": {k: info[k] for k in ("enabled", "repo_url", "app_name", "default_branch")},
+    return {"project": {k: info[k] for k in ("enabled", "repo_url", "app_name", "default_branch", "coordinator_url")},
             "jobdesks": counts, "ci": [{k: x[k] for k in ("job_id", "branch", "sha", "status", "step", "shards",
                                                            "shards_done", "nodes", "wall_s")} for x in ci]}
 
@@ -607,6 +624,24 @@ def admin_jobdesk_action(jid: int, body: JobdeskAction, authorization: str = Hea
                           "pr_url = NULL, merged_sha = NULL, updated_at = now(), note = %s WHERE id = %s", (note, jid))
             _event(c, jid, who, body.action, note or "")
     return {"ok": True}
+
+
+class PublicUrl(BaseModel):
+    url: str
+
+
+@router.post("/api/admin/public-url")
+def admin_public_url(body: PublicUrl, authorization: str = Header(None)):
+    """Simpan alamat HTTPS koordinator (dipanggil './hpc.sh head-online') untuk instruksi relawan."""
+    _admin(authorization)
+    url = body.url.strip().rstrip("/")
+    if not re.match(r"^https?://[A-Za-z0-9.-]+(:\d+)?$", url):
+        raise HTTPException(400, "Alamat tidak valid, contoh: https://contoh-acak.trycloudflare.com")
+    with db() as c:
+        c.execute("""INSERT INTO settings (key, value) VALUES ('public_coordinator_url', %s)
+                     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (url,))
+    log(f"[PROYEK] Alamat koordinator untuk relawan: {url}")
+    return {"ok": True, "coordinator_url": url}
 
 
 @router.get("/api/admin/ci")
