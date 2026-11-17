@@ -146,6 +146,11 @@ STATEMENTS = [
     # Nama tampilan pilihan relawan (PREFERRED USERNAME di Register), tampil di navbar saat login
     "ALTER TABLE workers ADD COLUMN IF NOT EXISTS username TEXT",
     "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS username TEXT",
+    # Nama depan & nama belakang relawan
+    "ALTER TABLE workers ADD COLUMN IF NOT EXISTS first_name TEXT",
+    "ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_name TEXT",
+    "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS first_name TEXT",
+    "ALTER TABLE worker_auth_sessions ADD COLUMN IF NOT EXISTS last_name TEXT",
     # Sesi web relawan: hanya HASH token sesi yang disimpan; token worker (CLI) tidak pernah ke browser.
     """CREATE TABLE IF NOT EXISTS worker_sessions (
         token_hash   TEXT PRIMARY KEY,

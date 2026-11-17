@@ -147,13 +147,29 @@ def me(authorization: str = Header(None)):
             WHERE a.worker_id = %s ORDER BY a.id DESC LIMIT 25""", (w["id"],)).fetchall()
         cert = c.execute("SELECT code, issued_at, updated_at, credits FROM certificates WHERE worker_id = %s",
                          (w["id"],)).fetchone()
-        acc = c.execute("SELECT password_hash IS NOT NULL AS has_password FROM workers WHERE id = %s",
-                        (w["id"],)).fetchone()
+        acc = c.execute("""
+            SELECT password_hash IS NOT NULL AS has_password,
+                   appreciation_consent_at IS NOT NULL AS has_consented,
+                   coalesce(show_in_appreciation, false) AS show_in_appreciation,
+                   first_name,
+                   last_name,
+                   username,
+                   name AS worker_node_name
+              FROM workers WHERE id = %s""", (w["id"],)).fetchone()
+        fn = (acc.get("first_name") or "").strip() if acc else ""
+        ln = (acc.get("last_name") or "").strip() if acc else ""
+        un = (acc.get("username") or "").strip() if acc else (w.get("username") or "").strip()
+        wn = (acc.get("worker_node_name") or w.get("name") or "").strip() if acc else (w.get("name") or "").strip()
     return {
-        "worker": {"id": w["id"], "name": w["name"], "github_username": w["github_username"],
+        "worker": {"id": w["id"], "name": wn, "worker_name": wn, "worker_node_name": wn,
+                   "github_username": w["github_username"],
                    "email": w["email"], "status": w["status"], "created_at": s["created_at"],
                    "online": s["online"], "last_seen": s["last_seen"],
-                   "show_in_appreciation": bool(w.get("show_in_appreciation", False)),
+                   "first_name": fn,
+                   "last_name": ln,
+                   "username": un,
+                   "show_in_appreciation": bool(acc["show_in_appreciation"]),
+                   "has_consented": bool(acc["has_consented"]),
                    "has_password": acc["has_password"]},
         "stats": {"credits": s["credits"], "rank": s["rank"], "of": len(ranked),
                   "badge": badge(s["credits"]), "next_badge": next_badge(s["credits"]),
@@ -174,6 +190,15 @@ def issue_certificate(authorization: str = Header(None)):
         el = _eligibility(s)
         if not el["eligible"]:
             raise HTTPException(400, {"message": "Belum memenuhi syarat sertifikat.", "missing": el["missing"]})
+        
+        # Ambil nama relawan dengan format 'first_name last_name'
+        w_row = c.execute("SELECT name, first_name, last_name, github_username FROM workers WHERE id = %s", (w["id"],)).fetchone()
+        cert_worker_name = (
+            f"{w_row['first_name']} {w_row['last_name']}".strip()
+            if w_row and w_row.get("first_name")
+            else (w_row["name"] if w_row else w["name"])
+        )
+
         code = "HPC-" + secrets.token_hex(5).upper()
         cert = c.execute("""
             INSERT INTO certificates (code, worker_id, worker_name, github_username, credits, tasks_validated)
@@ -182,8 +207,8 @@ def issue_certificate(authorization: str = Header(None)):
                SET worker_name = EXCLUDED.worker_name, github_username = EXCLUDED.github_username,
                    credits = EXCLUDED.credits, tasks_validated = EXCLUDED.tasks_validated, updated_at = now()
             RETURNING code, issued_at, updated_at, credits, tasks_validated""",
-            (code, w["id"], w["name"], w["github_username"], s["credits"], s["tasks_validated"])).fetchone()
-    print(f"[SERTIFIKAT] {cert['code']} untuk @{w['github_username']} ({cert['credits']} kredit)", flush=True)
+            (code, w["id"], cert_worker_name, w["github_username"], s["credits"], s["tasks_validated"])).fetchone()
+    print(f"[SERTIFIKAT] {cert['code']} untuk {cert['worker_name']} @{w['github_username']} ({cert['credits']} kredit)", flush=True)
     return {"ok": True, **cert}
 
 

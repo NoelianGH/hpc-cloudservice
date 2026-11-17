@@ -5,11 +5,11 @@ cd "$(dirname "$0")"
 [ -f .env ] || { cp .env.example .env; echo "File .env dibuat dari .env.example. Ubah isinya bila perlu."; }
 set -a; . ./.env; set +a
 
-HEAD="docker compose --env-file .env -p hpc-head -f head/docker-compose.yml"
-WORK="docker compose --env-file .env -p hpc-worker -f compute/docker-compose.yml"
+HEAD="docker compose --env-file .env -p hpc-head -f hpc/head/docker-compose.yml"
+WORK="docker compose --env-file .env -p hpc-worker -f hpc/compute/docker-compose.yml"
 
 stop_watch() {
-  for f in watch/.head.pid watch/.worker.pid; do
+  for f in hpc/watch/.head.pid hpc/watch/.worker.pid; do
     [ -f "$f" ] && { kill "$(cat "$f")" 2>/dev/null || true; rm -f "$f"; }
   done
   return 0
@@ -82,7 +82,7 @@ for r in d["leaderboard"]:
           r["credits"], r["tasks_validated"], r["reject_pct"]))
 ' ;;
   admin-setup)  # Atur email + password admin untuk dashboard admin web (/admin)
-                python3 head/coordinator/admin_auth.py set .env ;;
+                python3 hpc/head/coordinator/admin_auth.py set .env ;;
   stats)        curl -s http://localhost:8000/api/stats | python3 -m json.tool 2>/dev/null \
                   || curl -s http://localhost:8000/api/stats; echo ;;
 
@@ -91,7 +91,7 @@ for r in d["leaderboard"]:
                 # Autentikasi interaktif: verifikasi GitHub + kirim OTP ke email
                 # Setelah selesai, WORKER_TOKEN & WORKER_ID tersimpan ke .env secara otomatis
                 if command -v python3 >/dev/null 2>&1; then
-                    python3 worker_auth_cli.py "${@:2}"
+                    python3 hpc/worker_auth_cli.py "${@:2}"
                 else
                     echo "[ERROR] python3 tidak ditemukan. Install Python 3.8+ lalu coba lagi."
                     exit 1
@@ -119,22 +119,22 @@ for r in d["leaderboard"]:
                 fi ;;
 
   # ---- Watch folder: log aktivitas ----
-  watch-start)  mkdir -p watch
+  watch-start)  mkdir -p hpc/watch
                 stop_watch
                 # Log lama > 50 MB diputar agar folder watch/ tidak terus membesar
-                for f in watch/head-activity.log watch/worker-activity.log; do
+                for f in hpc/watch/head-activity.log hpc/watch/worker-activity.log; do
                   [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 52428800 ] && mv "$f" "$f.1"
                 done
-                nohup setsid $HEAD logs -f --timestamps --no-color --tail 0 >> watch/head-activity.log 2>&1 < /dev/null &
-                echo $! > watch/.head.pid
-                nohup setsid $WORK logs -f --timestamps --no-color --tail 0 >> watch/worker-activity.log 2>&1 < /dev/null &
-                echo $! > watch/.worker.pid
-                echo "Log aktivitas dicatat ke watch/head-activity.log dan watch/worker-activity.log" ;;
+                nohup setsid $HEAD logs -f --timestamps --no-color --tail 0 >> hpc/watch/head-activity.log 2>&1 < /dev/null &
+                echo $! > hpc/watch/.head.pid
+                nohup setsid $WORK logs -f --timestamps --no-color --tail 0 >> hpc/watch/worker-activity.log 2>&1 < /dev/null &
+                echo $! > hpc/watch/.worker.pid
+                echo "Log aktivitas dicatat ke hpc/watch/head-activity.log dan hpc/watch/worker-activity.log" ;;
   watch-stop)   stop_watch; echo "Pencatatan log aktivitas dihentikan." ;;
-  watch)        for f in watch/.head.pid watch/.worker.pid; do
+  watch)        for f in hpc/watch/.head.pid hpc/watch/.worker.pid; do
                   if [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; then echo "$f: aktif"; else echo "$f: mati"; fi
                 done
-                tail -n ${2:-20} watch/head-activity.log watch/worker-activity.log 2>/dev/null
+                tail -n ${2:-20} hpc/watch/head-activity.log hpc/watch/worker-activity.log 2>/dev/null
                 echo; "$0" alerts ;;
 
   # ---- Backup folder: backup database (otomatis tiap jam oleh layanan "backup") ----
@@ -144,16 +144,16 @@ for r in d["leaderboard"]:
                 curl -s "http://localhost:8000/api/admin/backups?limit=${2:-10}" -H "Authorization: Bearer $ADMIN_TOKEN" \
                   | python3 -c "import json,sys; d=json.load(sys.stdin); [print(('OK   ' if b['ok'] else 'GAGAL'), b['at'][:19], b['file'] or '-', b['bytes'] or '', 'salinan-luar' if b['copied'] else '', b['error'] or '') for b in d.get('backups', [])]" \
                   || echo "(koordinator tidak dapat dihubungi)"
-                echo; ls -lh backup/hourly backup/daily 2>/dev/null | grep -v '^total' ;;
+                echo; ls -lh hpc/backup/hourly hpc/backup/daily 2>/dev/null | grep -v '^total' ;;
   backup-env)   # .env berisi password/token: disimpan TERENKRIPSI (AES-256, passphrase Anda)
-                mkdir -p backup/env
-                OUT="backup/env/env-$(date +%Y%m%d-%H%M%S).enc"
+                mkdir -p hpc/backup/env
+                OUT="hpc/backup/env/env-$(date +%Y%m%d-%H%M%S).enc"
                 openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in .env -out "$OUT" \
                   && echo "Tersimpan terenkripsi: $OUT (buka: ./hpc.sh restore-env $OUT)" ;;
-  restore-env)  [ -f "${2:-}" ] || { echo "Pemakaian: ./hpc.sh restore-env backup/env/env-....enc"; exit 1; }
+  restore-env)  [ -f "${2:-}" ] || { echo "Pemakaian: ./hpc.sh restore-env hpc/backup/env/env-....enc"; exit 1; }
                 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$2" -out .env.pulih \
                   && echo "Didekripsi ke .env.pulih. Periksa, lalu: mv .env.pulih .env" ;;
-  restore)      [ -f "${2:-}" ] || { echo "Pemakaian: ./hpc.sh restore backup/hourly/hpc-db-....sql.gz  (lihat: ./hpc.sh backups)"; exit 1; }
+  restore)      [ -f "${2:-}" ] || { echo "Pemakaian: ./hpc.sh restore hpc/backup/hourly/hpc-db-....sql.gz  (lihat: ./hpc.sh backups)"; exit 1; }
                 gunzip -t "$2" || { echo "File backup rusak: $2"; exit 1; }
                 read -r -p "Database sekarang akan DITIMPA dengan $2. Lanjut? [y/N] " OK
                 [ "$OK" = "y" ] || [ "$OK" = "Y" ] || { echo "Dibatalkan."; exit 1; }

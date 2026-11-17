@@ -70,6 +70,8 @@ class AuthRegisterRequest(BaseModel):
     worker_name: str
     github_username: str
     email: str
+    first_name: str | None = None
+    last_name: str | None = None
     # Password login WEBSITE (wajib dari halaman Register; boleh kosong dari CLI lama,
     # lalu dibuat belakangan di dashboard). Disimpan sebagai hash PBKDF2, tidak pernah teks asli.
     password: str | None = None
@@ -90,7 +92,11 @@ def auth_register_request(body: AuthRegisterRequest):
     2. Jika lolos, membuat token OTP 6-digit dan menyimpannya di DB (berlaku 10 menit).
     3. Mengirimkan OTP ke email user.
     """
+    first_name = (body.first_name or "").strip()[:50] or None
+    last_name = (body.last_name or "").strip()[:50] or None
     worker_name = body.worker_name.strip()[:50]
+    if not worker_name and first_name:
+        worker_name = f"{first_name} {last_name or ''}".strip()[:50]
     github_user = body.github_username.strip()
     email = body.email.strip()
 
@@ -135,8 +141,8 @@ def auth_register_request(body: AuthRegisterRequest):
                 c.execute("""
                     INSERT INTO worker_auth_sessions 
                         (session_id, worker_name, github_username, email, otp, otp_expires_at, github_metrics,
-                         password_hash, username)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         password_hash, username, first_name, last_name)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     session_id,
                     worker_name,
@@ -147,6 +153,8 @@ def auth_register_request(body: AuthRegisterRequest):
                     Jsonb(gh_check["factors"]),
                     password_hash,
                     username,
+                    first_name,
+                    last_name,
                 ))
             break
         except Exception as e:
@@ -238,17 +246,18 @@ def auth_verify_otp(body: AuthVerifyRequest):
             c.execute("""
                 UPDATE workers 
                 SET name = %s, email = %s, auth_token = %s, status = 'active', last_seen = now(),
-                    password_hash = coalesce(%s, password_hash), username = coalesce(%s, username)
+                    password_hash = coalesce(%s, password_hash), username = coalesce(%s, username),
+                    first_name = coalesce(%s, first_name), last_name = coalesce(%s, last_name)
                 WHERE id = %s
             """, (session["worker_name"], session["email"], worker_token, session.get("password_hash"),
-                  session.get("username"), wid))
+                  session.get("username"), session.get("first_name"), session.get("last_name"), wid))
         else:
             wid = f"w-{uuid.uuid4().hex[:8]}"
             c.execute("""
-                INSERT INTO workers (id, name, github_username, email, auth_token, status, password_hash, username)
-                VALUES (%s, %s, %s, %s, %s, 'active', %s, %s)
+                INSERT INTO workers (id, name, github_username, email, auth_token, status, password_hash, username, first_name, last_name)
+                VALUES (%s, %s, %s, %s, %s, 'active', %s, %s, %s, %s)
             """, (wid, session["worker_name"], session["github_username"], session["email"], worker_token,
-                  session.get("password_hash"), session.get("username")))
+                  session.get("password_hash"), session.get("username"), session.get("first_name"), session.get("last_name")))
 
     return {
         "status": "authenticated",

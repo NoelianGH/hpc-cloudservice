@@ -58,11 +58,11 @@ export default function AppreciationPage() {
           </div>
 
           <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-white sm:text-4xl lg:text-5xl">
-            Papan Apresiasi Kontributor
+            Contributor Appreciation Board
           </h1>
           <p className="mt-3 text-sm sm:text-base text-zinc-300 leading-relaxed font-normal">
-            Penghargaan dan terima kasih tulus kami kepada para relawan yang telah mendonasikan kapasitas CPU idle 
-            mereka untuk menjalankan tugas komputasi sains terbuka di jaringan <strong>IdleScale</strong>.
+            Our deepest gratitude to the dedicated volunteers donating idle CPU power to advance open scientific
+            computing across the <strong>IdleScale</strong> community network.
           </p>
 
           {/* Privacy & Consent Notice Banner */}
@@ -70,10 +70,10 @@ export default function AppreciationPage() {
             <div className="flex items-start space-x-3">
               <span className="text-cyber-amber-bright text-base mt-0.5">ℹ</span>
               <div className="leading-relaxed">
-                <span className="font-semibold text-white">Transparansi &amp; Persetujuan Privasi:</span>
+                <span className="font-semibold text-white">Privacy &amp; Consent Transparency:</span>
                 <p className="mt-1 text-zinc-400">
-                  Daftar di bawah ini <strong>hanya menampilkan kontributor yang telah memberikan persetujuan (consent)</strong> secara eksplisit saat mengakhiri sesi komputasi mereka. 
-                  Setiap kotak di bawah dapat diklik untuk mengunjungi langsung profil GitHub resmi dari masing-masing kontributor.
+                  This board exclusively features contributors who have given explicit consent upon concluding their computing session.
+                  Click on any contributor card to directly explore their official GitHub profile and portfolio.
                 </p>
               </div>
             </div>
@@ -83,18 +83,18 @@ export default function AppreciationPage() {
         {/* Counter Bar */}
         <div className="mt-10 flex flex-wrap items-center justify-between border-b border-cyber-border/70 pb-4 gap-3 text-xs">
           <div className="flex items-center space-x-2">
-            <span className="font-mono text-zinc-400">TOTAL RELAWAN TERVERIFIKASI:</span>
+            <span className="font-mono text-zinc-400">TOTAL VERIFIED CONTRIBUTORS:</span>
             <span className="font-mono font-bold text-cyber-amber-bright text-sm">
-              {data?.total ?? 0} KONTRIBUTOR
+              {data?.total ?? 0} CONTRIBUTORS
             </span>
           </div>
           <div className="flex items-center space-x-3 text-[11px] text-zinc-400">
             <span className="flex items-center space-x-1.5">
               <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-              <span>Profil GitHub Aktif</span>
+              <span>Active GitHub Profile</span>
             </span>
             <span>•</span>
-            <span className="text-zinc-500">Klik kotak untuk membuka GitHub</span>
+            <span className="text-zinc-500">Click any card to open GitHub</span>
           </div>
         </div>
 
@@ -102,7 +102,7 @@ export default function AppreciationPage() {
         {loading && (
           <div className="py-20 text-center">
             <div className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-cyber-amber border-t-transparent"></div>
-            <p className="mt-3 font-mono text-xs text-zinc-400">Memuat data kontributor apresiasi...</p>
+            <p className="mt-3 font-mono text-xs text-zinc-400">Loading appreciation board contributors...</p>
           </div>
         )}
 
@@ -202,23 +202,23 @@ export default function AppreciationPage() {
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-cyber-amber/40 bg-cyber-surface text-cyber-amber-bright text-xl">
               ⭐
             </div>
-            <h3 className="mt-4 font-bold text-base text-white">Belum Ada Profil yang Ditampilkan</h3>
+            <h3 className="mt-4 font-bold text-base text-white">No Profiles Displayed Yet</h3>
             <p className="mt-2 text-xs text-zinc-400 max-w-md mx-auto leading-relaxed">
-              Papan apresiasi ini memegang teguh prinsip privasi. Profil kontributor hanya akan muncul di sini 
-              jika relawan memilih opsi <strong>&quot;Tampilkan Profil Saya&quot;</strong> saat mengakhiri sesi komputasi mereka.
+              This appreciation board strictly enforces privacy-first consent. Contributor profiles only appear here 
+              after volunteers explicitly choose <strong>&quot;Show My Profile&quot;</strong> upon ending their compute session.
             </p>
             <div className="mt-6 flex justify-center gap-3">
               <Link
                 href="/join"
                 className="rounded border border-cyber-amber bg-cyber-amber px-5 py-2 text-xs font-semibold text-cyber-void shadow-amber-glow hover:bg-cyber-amber-bright transition-all"
               >
-                Gabung Jadi Relawan &rarr;
+                Join as Volunteer &rarr;
               </Link>
               <Link
                 href="/dashboard"
                 className="rounded border border-cyber-border px-5 py-2 text-xs font-semibold text-zinc-300 hover:border-cyber-amber transition-all"
               >
-                Buka Dashboard
+                Open Dashboard
               </Link>
             </div>
           </div>

@@ -56,14 +56,14 @@ export default function CyberNavbar() {
   // Menu utama di tengah (Desktop)
   const centerLinks = [
     { href: "/", label: "OVERVIEW" },
-    { href: "/join", label: "GABUNG" },
+    { href: "/join", label: "FAQ" },
     { href: "/appreciation", label: "APPRECIATION" },
   ];
 
   // Semua menu untuk drawer (Mobile / saat window diminimize)
   const allNavLinks = [
     { href: "/", label: "OVERVIEW" },
-    { href: "/join", label: "GABUNG" },
+    { href: "/join", label: "FAQ" },
     { href: "/appreciation", label: "APPRECIATION" },
     { href: "/dashboard", label: "DASHBOARD" },
     { href: "/admin", label: "ADMIN" },

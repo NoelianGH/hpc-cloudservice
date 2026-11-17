@@ -1,7 +1,7 @@
 import Link from "next/link";
 import TerminalCode from "@/components/TerminalCode";
 
-export const metadata = { title: "Gabung Jadi Relawan • IdleScale Cloud" };
+export const metadata = { title: "FAQ & Panduan Relawan • IdleScale Cloud" };
 
 const STEPS = [
   {
@@ -46,7 +46,7 @@ export default function JoinPage() {
     <div className="mx-auto max-w-6xl px-4 py-12 font-sans sm:px-6 lg:px-8">
       <div className="inline-flex items-center space-x-2 rounded-full border border-cyber-amber/40 bg-cyber-surface px-3 py-1 text-xs text-cyber-amber-bright mb-4">
         <span className="h-1.5 w-1.5 rounded-full bg-cyber-amber-bright"></span>
-        <span className="font-mono uppercase tracking-wider">Program Relawan Komputasi</span>
+        <span className="font-mono uppercase tracking-wider">FAQ & Panduan Relawan Komputasi</span>
       </div>
 
       <h1 className="text-2xl font-extrabold text-white sm:text-4xl tracking-tight">

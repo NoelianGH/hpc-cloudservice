@@ -80,6 +80,7 @@ def worker_from_session(auth: str | None) -> dict | None:
     with db() as c:
         w = c.execute("""
             SELECT w.id, w.name, w.github_username, w.email, w.status, w.username,
+                   w.first_name, w.last_name,
                    coalesce(w.show_in_appreciation, false) AS show_in_appreciation,
                    w.appreciation_consent_at, w.password_hash IS NOT NULL AS has_password,
                    s.expires_at
@@ -206,6 +207,52 @@ def set_password(body: PasswordBody, authorization: str = Header(None)):
             raise HTTPException(400, "Password lama salah.")
         c.execute("UPDATE workers SET password_hash = %s WHERE id = %s", (hash_password(body.password), w["id"]))
     return {"ok": True, "message": "Password tersimpan. Mulai sekarang login website pakai email + password."}
+
+
+class ProfileUpdateBody(BaseModel):
+    name: str | None = None
+    worker_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
+    email: str | None = None
+    github_username: str | None = None
+
+
+@router.post("/api/me/profile")
+def update_profile(body: ProfileUpdateBody, authorization: str = Header(None)):
+    w = check_volunteer_auth(authorization, web_only=False)["worker"]
+    with db() as c:
+        updates = []
+        params = []
+        fn = body.first_name.strip()[:50] if body.first_name is not None else None
+        ln = body.last_name.strip()[:50] if body.last_name is not None else None
+        un = body.username.strip()[:30] if body.username is not None else None
+        wn = (body.worker_name or body.name or "").strip()[:50] if (body.worker_name is not None or body.name is not None) else None
+
+        if fn is not None:
+            updates.append("first_name = %s")
+            params.append(fn)
+        if ln is not None:
+            updates.append("last_name = %s")
+            params.append(ln)
+        if un is not None:
+            updates.append("username = %s")
+            params.append(un)
+        if wn is not None and wn:
+            updates.append("name = %s")
+            params.append(wn)
+
+        if body.email is not None and body.email.strip():
+            updates.append("email = %s")
+            params.append(body.email.strip()[:100])
+        if body.github_username is not None and body.github_username.strip():
+            updates.append("github_username = %s")
+            params.append(body.github_username.strip().lstrip("@")[:60])
+        if updates:
+            params.append(w["id"])
+            c.execute(f"UPDATE workers SET {', '.join(updates)} WHERE id = %s", tuple(params))
+    return {"ok": True, "message": "Profil berhasil diperbarui."}
 
 
 @router.get("/api/me/cli-token")

@@ -4,3 +4,7 @@ backup/*
 !backup/.gitkeep
 watch/*
 !watch/.gitkeep
+hpc/backup/*
+!hpc/backup/.gitkeep
+hpc/watch/*
+!hpc/watch/.gitkeep

@@ -4,11 +4,14 @@ import { requestRegistration } from "@/lib/coordinator";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { workerName, githubUsername, email, password, username } = body;
+    const { workerName, githubUsername, email, password, username, firstName, lastName } = body;
 
-    if (!workerName || !githubUsername || !email) {
+    const fullDisplayName = `${firstName || ""} ${lastName || ""}`.trim();
+    const effectiveWorkerName = (workerName || fullDisplayName || `worker-${githubUsername}`).trim();
+
+    if (!githubUsername || !email) {
       return NextResponse.json(
-        { detail: "workerName, githubUsername, dan email wajib diisi." },
+        { detail: "githubUsername dan email wajib diisi." },
         { status: 400 }
       );
     }
@@ -18,11 +21,13 @@ export async function POST(req: Request) {
     }
 
     const result = await requestRegistration({
-      worker_name: workerName,
+      worker_name: effectiveWorkerName,
       github_username: githubUsername,
       email,
       password,
       username: typeof username === "string" ? username.trim() : undefined,
+      first_name: typeof firstName === "string" ? firstName.trim() : undefined,
+      last_name: typeof lastName === "string" ? lastName.trim() : undefined,
     });
 
     if (result.status === "error") {

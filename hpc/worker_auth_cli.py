@@ -15,7 +15,14 @@ import sys
 import urllib.error
 import urllib.request
 
-ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_this_dir)
+if os.path.exists(os.path.join(_parent_dir, ".env")):
+    ENV_FILE = os.path.join(_parent_dir, ".env")
+elif os.path.exists(os.path.join(_this_dir, ".env")):
+    ENV_FILE = os.path.join(_this_dir, ".env")
+else:
+    ENV_FILE = os.path.join(_parent_dir, ".env")
 
 
 def read_env() -> dict:

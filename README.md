@@ -28,18 +28,32 @@ Penjelasan: [docs/WATCH-BACKUP.md](docs/WATCH-BACKUP.md).
 | Tugas berbutir halus, siklus compute → communicate → compute | Job multi-tahap `heat2d`: per tahap 1 tugas kecil per blok, halo dari blok tetangga dikirim koordinator antar-tahap; hasil identik dengan serial. [docs/JOB-MULTI-TAHAP-DAN-REPO.md](docs/JOB-MULTI-TAHAP-DAN-REPO.md) |
 | Saran Prof Yudi: commit SHA + branch | Tiap jobdesk punya branch sendiri di repo B (`task/<id>-<judul>`), tiap push dites per commit SHA dan hasilnya jadi centang/silang di GitHub. Kode job komputasi juga dipatok ke commit SHA; hasilnya bisa di-commit ke branch `results/job-<id>` |
 
-## Struktur
+## Struktur Proyek
+
+Proyek ini terbagi rapi menjadi dua domain utama: **Frontend Web Portal** (`web/`) dan **Sistem Klaster HPC** (`hpc/`):
 
 ```
-head/coordinator/   app.py (API), jobs.py (job & tahap, termasuk CI), validator.py, volunteer.py (kredit/leaderboard/sertifikat),
-                    project.py (jobdesk repo B, webhook/polling push, CI), publisher.py (GitHub API),
-                    schema.py (migrasi DB), admin.py, common.py, watch.py (pemantauan + peringatan admin)
-head/backup/        backup.sh: backup database otomatis tiap jam (layanan "backup")
-head/db/init.sql    skema database (database lama dimigrasi otomatis oleh schema.py)
-compute/            worker.py + Dockerfile + docker-compose.yml (sandbox)
-contoh-repo-b/      contoh repo B: aplikasi pengaduan masyarakat + hpc.json (perintah build & test)
-job-template/       contoh isi repo job komputasi (run.py)
-web/                portal: /join, /register, /login, /dashboard, /leaderboard, /certificate/<kode>, /admin
-tests/              test_heat2d.py (kebenaran multi-tahap tanpa Docker)
-worker_auth_cli.py  pendaftaran relawan lewat terminal (./hpc.sh worker-login)
+├── web/                     # PORTAL WEBSITE (Next.js 14, Tailwind CSS, TypeScript)
+│   ├── app/                 # Halaman: /overview, /join, /register, /dashboard, /appreciation, /admin
+│   ├── components/          # Komponen UI (CyberNavbar, CyberFooter, TerminalCode, dll.)
+│   └── lib/                 # Helper API klien & integrasi ke koordinator backend
+│
+├── hpc/                     # CORE SISTEM CLOUD HPC (Head Node, Compute Nodes, Database)
+│   ├── head/                # Head Node: Koordinator API (FastAPI), Validator Quorum, Database PostgreSQL
+│   │   ├── coordinator/     # app.py (REST API), validator.py, jobs.py, volunteer.py, project.py, watch.py
+│   │   ├── db/              # init.sql (skema PostgreSQL terkelola)
+│   │   └── docker-compose.yml
+│   ├── compute/             # Compute Worker Node Sandbox (Docker, non-root, cap_drop ALL)
+│   │   ├── worker.py        # Daemon worker penarik & pengeksekusi tugas
+│   │   └── docker-compose.yml
+│   ├── backup/              # Layanan backup database berkala (hourly/daily)
+│   ├── watch/               # Pemantauan aktivitas klaster & log runtime
+│   ├── job-template/        # Template komputasi HPC ilmiah (run.py)
+│   ├── contoh-repo-b/       # Contoh repositori aplikasi untuk pengujian CI terdistribusi
+│   ├── tests/               # Pengujian algoritma HPC numerik (test_heat2d.py)
+│   └── worker_auth_cli.py   # Skrip CLI autentikasi relawan via terminal (./hpc.sh worker-login)
+│
+├── hpc.sh                   # Runner CLI utama proyek (head-up, worker-up, job, logs, dll.)
+├── .env                     # Konfigurasi variabel lingkungan terpusat
+└── docs/                    # Dokumentasi teknis sistem & panduan relawan
 ```

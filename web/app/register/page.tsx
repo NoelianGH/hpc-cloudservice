@@ -24,6 +24,8 @@ export default function RegisterPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Analysis result & Session details
   const [sessionId, setSessionId] = useState<string>("");
@@ -292,12 +294,11 @@ export default function RegisterPage() {
 
                 <div>
                   <label className="block font-mono text-[11px] text-zinc-300">
-                    LAST NAME <span className="text-cyber-amber-bright">*</span>
+                    LAST NAME <span className="font-sans text-[10px] text-zinc-500">(opsional)</span>
                   </label>
                   <input
                     type="text"
                     name="lastName"
-                    required
                     value={formData.lastName}
                     onChange={handleInputChange}
                     placeholder="e.g. Pratama"
@@ -389,33 +390,73 @@ export default function RegisterPage() {
                   <label className="block font-mono text-[11px] text-zinc-300">
                     PASSWORD LOGIN WEBSITE *
                   </label>
-                  <input
-                    type="password"
-                    name="password"
-                    required
-                    minLength={8}
-                    autoComplete="new-password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    placeholder="••••••••••••"
-                    className="mt-1 w-full rounded border border-cyber-border bg-cyber-black px-3 py-2 font-mono text-xs text-white placeholder-zinc-600 focus:border-cyber-amber focus:outline-none focus:ring-1 focus:ring-cyber-amber"
-                  />
+                  <div className="relative mt-1">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      value={formData.password}
+                      onChange={handleInputChange}
+                      placeholder="••••••••••••"
+                      className="w-full rounded border border-cyber-border bg-cyber-black px-3 py-2 pr-10 font-mono text-xs text-white placeholder-zinc-600 focus:border-cyber-amber focus:outline-none focus:ring-1 focus:ring-cyber-amber"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-cyber-amber-bright focus:outline-none p-1 transition-colors"
+                      title={showPassword ? "Sembunyikan password" : "Lihat password"}
+                      aria-label={showPassword ? "Sembunyikan password" : "Lihat password"}
+                    >
+                      {showPassword ? (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                        </svg>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block font-mono text-[11px] text-zinc-300">
                     CONFIRM PASSWORD
                   </label>
-                  <input
-                    type="password"
-                    name="confirmPassword"
-                    required
-                    autoComplete="new-password"
-                    value={formData.confirmPassword}
-                    onChange={handleInputChange}
-                    placeholder="••••••••••••"
-                    className="mt-1 w-full rounded border border-cyber-border bg-cyber-black px-3 py-2 font-mono text-xs text-white placeholder-zinc-600 focus:border-cyber-amber focus:outline-none focus:ring-1 focus:ring-cyber-amber"
-                  />
+                  <div className="relative mt-1">
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      name="confirmPassword"
+                      required
+                      autoComplete="new-password"
+                      value={formData.confirmPassword}
+                      onChange={handleInputChange}
+                      placeholder="••••••••••••"
+                      className="w-full rounded border border-cyber-border bg-cyber-black px-3 py-2 pr-10 font-mono text-xs text-white placeholder-zinc-600 focus:border-cyber-amber focus:outline-none focus:ring-1 focus:ring-cyber-amber"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-cyber-amber-bright focus:outline-none p-1 transition-colors"
+                      title={showConfirmPassword ? "Sembunyikan password" : "Lihat password"}
+                      aria-label={showConfirmPassword ? "Sembunyikan password" : "Lihat password"}
+                    >
+                      {showConfirmPassword ? (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                        </svg>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
 

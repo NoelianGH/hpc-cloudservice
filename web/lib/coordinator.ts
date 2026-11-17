@@ -11,6 +11,8 @@ export async function requestRegistration(payload: {
   email: string;
   password: string;
   username?: string;
+  first_name?: string;
+  last_name?: string;
 }): Promise<RegisterResponse> {
   try {
     const res = await fetch(`${COORDINATOR_URL}/api/auth/register-request`, {
