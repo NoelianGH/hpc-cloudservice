@@ -20,8 +20,15 @@ Alur:
      agen memutus semua sesi SSH user itu dan menghapus user-nya. Login website tidak
      terpengaruh; relawan bisa mengambil jobdesk baru di website -> akses node baru.
 
+  6. Relawan TIDAK AKTIF selama NODE_IDLE_MINUTES (bawaan 30; tidak ada ketikan / keluaran di
+     terminal dan tidak ada proses yang memakai CPU): sesi SSH diputus dan node DILEPAS untuk
+     relawan lain. Jobdesk tetap miliknya dan token node TETAP berlaku. Folder kerja tetap ada
+     (folder /home dipakai bersama semua node). Untuk lanjut: MASUK LAGI KE NODE di website
+     (node terakhir diutamakan), lalu ssh dengan token yang sama. Semua node penuh = ditolak
+     dengan pesan jelas.
+
 Compute node mati (tidak sync > NODE_DEAD_SECONDS): aksesnya dilepas dan diambil node lain
-(FIFO), yang meng-clone ulang branch dari GitHub. Kode yang sudah di-push tidak hilang.
+(FIFO). Folder kerja ada di volume bersama, jadi pekerjaan yang belum di-push ikut pindah.
 
 Variabel lingkungan:
   NODE_ACCESS         1 (bawaan) = aktif; 0 = alur lama (relawan diundang collaborator GitHub)
@@ -29,7 +36,8 @@ Variabel lingkungan:
   NODE_SSH_HOST       alamat yang ditampilkan ke relawan untuk ssh (bawaan localhost; isi IP LAN head)
   NODE_SSH_PORT       port ssh cadangan bila agen tidak melaporkan port-nya (bawaan 2222);
                       tiap node melaporkan port publiknya sendiri (node1 2222, node2 2223, ...)
-  NODE_MAX_USERS      relawan aktif maksimal per compute node (bawaan 3). Bila semua node penuh,
+  NODE_MAX_USERS      relawan aktif maksimal per compute node (bawaan 1: satu node = satu relawan,
+                      lengkap dengan Docker uji sendiri). Bila semua node penuh,
                       AMBIL JOBDESK ditolak dan jobdesk tetap di antrean sampai ada slot kosong.
 
 Banyak compute node: akses baru ditempatkan di node ONLINE yang paling sedikit penghuninya,
@@ -38,6 +46,7 @@ bila sama, node yang paling lama tidak diberi akses (bergiliran: node1, node2, n
   NODE_TOKEN_TTL_DAYS umur maksimal token node per jobdesk (bawaan 7; 0 = tanpa batas). Lewat dari
                       itu akses dicabut seperti saat disetujui, jobdesk tetap milik relawan; admin
                       memilih BERI AKSES NODE (token baru) atau KEMBALIKAN KE ANTREAN.
+  NODE_IDLE_MINUTES   lepas node setelah sekian menit tidak aktif (bawaan 30; 0 = tidak pernah)
   NODE_READ_MAIN      1 (bawaan) = dari node boleh fetch main (baca saja, untuk git merge origin/main);
                       0 = hanya branch jobdesk sendiri yang terlihat & bisa di-fetch
 
@@ -68,7 +77,9 @@ ENABLED = os.environ.get("NODE_ACCESS", "1").strip() != "0"
 NODE_TOKEN = strong_secret("NODE_TOKEN")
 SSH_HOST = os.environ.get("NODE_SSH_HOST", "").strip() or "localhost"
 SSH_PORT = int(os.environ.get("NODE_SSH_PORT", "2222") or 2222)
-MAX_USERS = int(os.environ.get("NODE_MAX_USERS", "3") or 3)
+MAX_USERS = int(os.environ.get("NODE_MAX_USERS", "1") or 1)
+IDLE_SECONDS = int(float(os.environ.get("NODE_IDLE_MINUTES", "30") or 0) * 60)
+PICK_LOCK = 4242   # pg_advisory_xact_lock: penempatan akses ke node tidak saling balap
 DEAD_SECONDS = int(os.environ.get("NODE_DEAD_SECONDS", "60") or 60)
 READ_MAIN = os.environ.get("NODE_READ_MAIN", "1").strip() != "0"
 TOKEN_TTL_DAYS = float(os.environ.get("NODE_TOKEN_TTL_DAYS", "7") or 0)
@@ -116,6 +127,7 @@ def create_access(c, jobdesk_id: int, worker_id: str) -> dict | None:
     if not ENABLED:
         return None
     revoke_access(c, jobdesk_id, "diganti akses baru")
+    c.execute("SELECT pg_advisory_xact_lock(%s)", (PICK_LOCK,))
     node = pick_node(c)
     token = new_token()   # kolom password dan git_token berisi token yang SAMA
     row = c.execute("""
@@ -153,7 +165,8 @@ def capacity(c) -> dict:
     rows = c.execute(_free_nodes_sql(), (DEAD_SECONDS,)).fetchall()
     total = sum(r["max_users"] for r in rows)
     used = sum(min(r["used"], r["max_users"]) for r in rows)
-    waiting = c.execute("SELECT count(*) AS n FROM node_access WHERE status = 'active' AND node IS NULL").fetchone()["n"]
+    waiting = c.execute("""SELECT count(*) AS n FROM node_access
+                             WHERE status = 'active' AND node IS NULL AND parked_at IS NULL""").fetchone()["n"]
     return {"nodes": len(rows), "total": total, "used": used, "free": max(0, total - used - waiting)}
 
 
@@ -211,7 +224,7 @@ def access_for_volunteer(c, jobdesk_id: int) -> dict | None:
     """Info akses node untuk kartu jobdesk di dashboard relawan."""
     a = c.execute("""
         SELECT a.id, a.username, a.password AS token, a.node, a.provisioned_at, a.last_login_at, a.sessions,
-               a.created_at, a.expires_at, n.last_seen AS node_seen, n.ssh_port,
+               a.created_at, a.expires_at, a.parked_at, a.last_node, n.last_seen AS node_seen, n.ssh_port,
                coalesce((now() - n.last_seen) < make_interval(secs => %s), false) AS node_online
         FROM node_access a LEFT JOIN nodes n ON n.name = a.node
         WHERE a.jobdesk_id = %s AND a.status = 'active' AND (a.expires_at IS NULL OR a.expires_at > now())
@@ -224,6 +237,8 @@ def access_for_volunteer(c, jobdesk_id: int) -> dict | None:
     port = "" if p == 22 else f"-p {p} "
     online = ep["online_hosts"].get(a["node"] or "")
     a["ready"] = bool(a["node"] and a["provisioned_at"] and a["node_online"])
+    a["parked"] = bool(not a["node"] and a["parked_at"])   # dilepas karena tidak aktif: MASUK LAGI KE NODE
+    a["idle_minutes"] = max(1, IDLE_SECONDS // 60) if IDLE_SECONDS else 0
     a["ssh_command"] = f"ssh {port}{a['username']}@{ep['host']}"
     a["ssh_online_command"] = (f'ssh -o ProxyCommand="cloudflared access ssh --hostname %h" '
                                f"{a['username']}@{online}") if online else None
@@ -252,6 +267,48 @@ def rotate_node_token(jid: int, authorization: str = Header(None)):
     return {"ok": True, "token": token}
 
 
+def resume_access(c, worker_id: str, jobdesk_id: int) -> dict:
+    """
+    MASUK LAGI KE NODE: akses yang dilepas karena tidak aktif mendapat node lagi (token tetap).
+    Node terakhir diutamakan bila masih kosong. Semua node penuh -> 409 dengan pesan jelas.
+    """
+    with c.transaction():
+        c.execute("SELECT pg_advisory_xact_lock(%s)", (PICK_LOCK,))
+        a = c.execute("""SELECT id, username, node, last_node FROM node_access
+                          WHERE jobdesk_id = %s AND worker_id = %s AND status = 'active'
+                            AND (expires_at IS NULL OR expires_at > now()) FOR UPDATE""",
+                      (jobdesk_id, worker_id)).fetchone()
+        if not a:
+            raise HTTPException(404, "Jobdesk ini tidak punya akses compute node aktif.")
+        if a["node"]:
+            return {"node": a["node"], "already": True}
+        cap = capacity(c)
+        node = None
+        if cap["free"] > 0:
+            if a["last_node"]:
+                r = c.execute(f"SELECT f.name FROM ({_free_nodes_sql()}) f WHERE f.name = %s AND f.used < f.max_users",
+                              (DEAD_SECONDS, a["last_node"])).fetchone()
+                node = r["name"] if r else None
+            node = node or pick_node(c)
+        if not node:
+            raise HTTPException(409, f"Semua compute node sedang dipakai ({cap['used']}/{cap['total']} relawan aktif). "
+                                     "Jobdesk dan token node Anda tetap aman; coba lagi beberapa menit lagi.")
+        c.execute("""UPDATE node_access SET node = %s, parked_at = NULL, provisioned_at = NULL, sessions = 0
+                     WHERE id = %s""", (node, a["id"]))
+        c.execute("UPDATE nodes SET last_assigned_at = now() WHERE name = %s", (node,))
+        project._event(c, jobdesk_id, "relawan", "akses_node", f"{a['username']} masuk lagi ke compute node {node}")
+    return {"node": node, "already": False}
+
+
+@router.post("/api/me/jobdesk/{jid}/node-resume")
+def resume_node(jid: int, authorization: str = Header(None)):
+    """Tombol MASUK LAGI KE NODE (hanya lewat login website pemilik jobdesk)."""
+    w = check_volunteer_auth(authorization, web_only=True)["worker"]
+    with db() as c:
+        r = resume_access(c, w["id"], jid)
+    return {"ok": True, **r}
+
+
 # =============================================================================
 # Agen compute node (pull): sinkron daftar user
 # =============================================================================
@@ -260,6 +317,7 @@ class SyncBody(BaseModel):
     name: str
     users: list[str] = []            # user jd* yang ada di node sekarang (sudah siap)
     sessions: dict[str, int] = {}    # jumlah sesi SSH yang sedang login per user
+    idle: dict[str, int] = {}        # detik sejak aktivitas terakhir per user (terminal / CPU)
     max_users: int | None = None
     ssh_port: int | None = None      # port SSH node ini di laptop head (mis. 2222 / 2223)
 
@@ -296,14 +354,36 @@ def agent_sync(body: SyncBody, request: Request, authorization: str = Header(Non
             for m in moved:
                 project._event(c, m["jobdesk_id"], "sistem", "akses_node",
                                f"compute node {m['dead']} mati: {m['username']} dipindah ke node lain")
+            # Relawan tidak aktif terlalu lama: node dilepas (akses tetap aktif, token tetap)
+            notices: dict[str, str] = {}
+            if IDLE_SECONDS > 0:
+                for u in sorted(present):
+                    if int(body.idle.get(u, 0) or 0) < IDLE_SECONDS:
+                        continue
+                    p = c.execute("""UPDATE node_access SET node = NULL, provisioned_at = NULL, sessions = 0,
+                                            parked_at = now(), last_node = %s
+                                     WHERE node = %s AND username = %s AND status = 'active'
+                                     RETURNING jobdesk_id""", (name, name, u)).fetchone()
+                    if p:
+                        mins = IDLE_SECONDS // 60
+                        project._event(c, p["jobdesk_id"], "sistem", "akses_node",
+                                       f"{u} tidak aktif {mins} menit: sesi diputus, {name} dilepas untuk relawan lain "
+                                       "(jobdesk dan token tetap; MASUK LAGI KE NODE di website)")
+                        notices[u] = (f"Sesi diputus: tidak ada aktivitas selama {mins} menit, compute node {name} "
+                                      "dilepas untuk relawan lain. Jobdesk dan token node Anda TETAP. Folder kerja tetap "
+                                      "ada. Untuk lanjut: tekan MASUK LAGI KE NODE di website, lalu ssh lagi.")
+                        log(f"{u} di {name} tidak aktif, node dilepas")
+                present -= set(notices)
             # Akses yang belum punya node (node penuh saat dibuat / node lamanya mati) diambil FIFO
-            # (id terkecil dulu), hanya bila node ini yang paling longgar, sampai kapasitasnya
+            # (id terkecil dulu), hanya bila node ini yang paling longgar, sampai kapasitasnya.
+            # Akses yang dilepas karena tidak aktif (parkir) TIDAK diambil: relawan yang meminta lagi.
+            c.execute("SELECT pg_advisory_xact_lock(%s)", (PICK_LOCK,))
             mine = c.execute("SELECT count(*) AS n FROM node_access WHERE node = %s AND status = 'active'",
                              (name,)).fetchone()["n"]
             if mine < cap and pick_node(c) == name:
                 got = c.execute("""
                     UPDATE node_access SET node = %s WHERE id IN (
-                        SELECT id FROM node_access WHERE node IS NULL AND status = 'active'
+                        SELECT id FROM node_access WHERE node IS NULL AND status = 'active' AND parked_at IS NULL
                         ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED)
                     RETURNING jobdesk_id, username""", (name, cap - mine)).fetchall()
                 for g in got:
@@ -323,6 +403,10 @@ def agent_sync(body: SyncBody, request: Request, authorization: str = Header(Non
                 WHERE a.node = %s AND a.status = 'active' AND w.status = 'active'
                   AND d.status IN ('in_progress', 'review')
                 ORDER BY a.id""", (name,)).fetchall()
+            # Folder rumah (volume /home bersama semua node) yang masih harus disimpan: semua akses aktif,
+            # termasuk yang sedang di node lain / parkir. Selain ini dihapus agen (akses sudah dicabut).
+            keep = [r["username"] for r in c.execute(
+                "SELECT username FROM node_access WHERE status = 'active'").fetchall()]
     repo = project.PROJECT_REPO_URL.rsplit("/", 1)[-1].removesuffix(".git")
     return {"grants": [{
                 "user": r["username"], "uid": r["uid"], "password": r["password"], "git_token": r["git_token"],
@@ -332,7 +416,8 @@ def agent_sync(body: SyncBody, request: Request, authorization: str = Header(Non
                 "git_email": r["email"] or f"{r['github_username'] or r['username']}@users.noreply.github.com",
             } for r in rows],
             "repo": {"name": repo, "url": project.PROJECT_REPO_URL, "default_branch": project.DEFAULT_BRANCH},
-            "interval_s": 3, "token_ttl_days": TOKEN_TTL_DAYS}
+            "keep_users": keep, "notices": notices,
+            "interval_s": 3, "token_ttl_days": TOKEN_TTL_DAYS, "idle_minutes": IDLE_SECONDS // 60}
 
 
 # =============================================================================
@@ -674,7 +759,7 @@ def admin_nodes(authorization: str = Header(None)):
                    (SELECT count(*) FROM node_access a WHERE a.node = n.name AND a.status = 'active') AS users
             FROM nodes n ORDER BY n.name""", (DEAD_SECONDS,)).fetchall()
         access = c.execute("""
-            SELECT a.id, a.jobdesk_id, a.username, a.node, a.status, a.sessions, a.created_at,
+            SELECT a.id, a.jobdesk_id, a.username, a.node, a.status, a.sessions, a.created_at, a.parked_at, a.last_node,
                    a.provisioned_at, a.last_login_at, a.revoked_at, a.revoked_reason,
                    d.title, d.branch, d.status AS jobdesk_status, w.name AS worker_name, w.github_username
             FROM node_access a JOIN jobdesks d ON d.id = a.jobdesk_id JOIN workers w ON w.id = a.worker_id

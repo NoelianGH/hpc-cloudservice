@@ -19,7 +19,7 @@ type Jobdesk = {
   note: string | null; last_sha: string | null; last_ci_job: number | null; last_ci_status: string | null;
   pr_number: number | null; pr_url: string | null; merged_sha: string | null; worker_online: boolean;
   created_at: string; assigned_at: string | null; submitted_at: string | null; done_at: string | null; updated_at: string;
-  node_user?: string | null; node_name?: string | null; node_sessions?: number | null; node_ready?: boolean | null;
+  node_user?: string | null; node_name?: string | null; node_parked_at?: string | null; node_sessions?: number | null; node_ready?: boolean | null;
   node_last_login?: string | null; node_expires_at?: string | null; node_last_revoke?: string | null;
 };
 type NodeRow = {
@@ -351,7 +351,7 @@ export function JobdeskTab({ onUnauthorized }: { onUnauthorized: () => void }) {
                         <p className="mt-1 text-[10px] text-zinc-400">
                           {d.node_user ? (
                             <>
-                              node: <span className="text-white">{d.node_user}</span>@{d.node_name || "menunggu"}{" "}
+                              node: <span className="text-white">{d.node_user}</span>@{d.node_name || (d.node_parked_at ? `dilepas (tidak aktif sejak ${ago(d.node_parked_at)})` : "menunggu")}{" "}
                               {d.node_sessions ? <span className="text-emerald-400">&bull; {d.node_sessions} sesi login</span>
                                 : d.node_last_login ? <span>&bull; login terakhir {ago(d.node_last_login)}</span>
                                 : <span>&bull; {d.node_ready ? "belum pernah login" : "disiapkan"}</span>}

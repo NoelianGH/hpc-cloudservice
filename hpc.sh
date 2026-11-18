@@ -32,6 +32,7 @@ ensure_secrets() {
     echo "            (ganti di .env SEBELUM head-up pertama, atau ALTER USER hpc PASSWORD di database lama)." ;;
   esac
   [ -n "${ADMIN_EMAIL:-}" ] && [ -n "${ADMIN_PASSWORD_HASH:-}" ] || echo "PERINGATAN: login admin belum diatur. Jalankan ./hpc.sh admin-setup"
+  [ "${NODE_MAX_USERS:-1}" = 1 ] || echo "CATATAN: NODE_MAX_USERS=${NODE_MAX_USERS} di .env (rancangan sekarang 1 relawan per node; hapus baris itu / isi 1)"
   return 0
 }
 ensure_node_token() { ensure_secrets; }
@@ -47,18 +48,22 @@ case "$1" in
   # ---- Head node ----
   head-up)      ensure_node_token
                 $HEAD up -d --build; $HEAD ps; echo "Dashboard: http://localhost:8000"
-                echo "Compute node relawan: ssh -p ${NODE_SSH_PORT:-2222} (node1) / -p ${NODE2_SSH_PORT:-2223} (node2) jd<id>@${NODE_SSH_HOST:-localhost}" ;;
+                echo "Compute node relawan (5 node, port ${NODE_SSH_PORT:-2222}..${NODE5_SSH_PORT:-2226}): ssh -p <port> jd<id>@${NODE_SSH_HOST:-localhost}"
+                echo "  (port tiap relawan tampil di website; 1 relawan per node, Docker uji di tiap node: perintah 'uji')" ;;
   head-online)  $HEAD --profile online up -d; sleep 8
                 URL=$($HEAD logs tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
-                SSHURL=$($HEAD logs tunnel-ssh 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
-                SSHURL2=$($HEAD logs tunnel-ssh2 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
                 echo "Alamat HTTPS untuk relawan (COORDINATOR_URL di repo worker): ${URL:-(belum muncul, ulangi perintah ini)}"
-                echo "SSH node1 lewat internet: ${SSHURL:-(belum muncul, ulangi perintah ini)}"
-                echo "SSH node2 lewat internet: ${SSHURL2:-(belum muncul, ulangi perintah ini)}"
+                SSHJSON=""
+                for i in 1 2 3 4 5; do
+                  SVC=tunnel-ssh; [ "$i" = 1 ] || SVC="tunnel-ssh$i"
+                  U=$($HEAD logs "$SVC" 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
+                  echo "SSH node$i lewat internet: ${U:-(belum muncul, ulangi perintah ini)}"
+                  SSHJSON="$SSHJSON${SSHJSON:+,}\"node$i\":\"$U\""
+                done
                 # Simpan ke koordinator agar dashboard relawan menampilkan perintah setup / ssh yang tepat
                 [ -n "$URL" ] && curl -s -o /dev/null -X POST http://localhost:8000/api/admin/public-url \
                   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-                  -d "{\"url\":\"$URL\",\"ssh_urls\":{\"node1\":\"$SSHURL\",\"node2\":\"$SSHURL2\"}}" && echo "(tersimpan; tampil di dashboard relawan)" || true ;;
+                  -d "{\"url\":\"$URL\",\"ssh_urls\":{$SSHJSON}}" && echo "(tersimpan; tampil di dashboard relawan)" || true ;;
   nodes)        curl -s -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8000/api/admin/nodes | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
@@ -67,7 +72,7 @@ for n in d.get("nodes", []):
     print("%-10s %s %s/%s relawan  ip %s" % (n["name"], st, n["users"], n["max_users"], n["ip"]))
 print()
 for a in d.get("access", [])[:30]:
-    st = "AKTIF" if a["status"] == "active" else "dicabut"
+    st = ("PARKIR" if a.get("parked_at") and not a["node"] else "AKTIF") if a["status"] == "active" else "dicabut"
     print("#%-4s %-8s %-8s node %-6s sesi %s  %s  %s  %s" % (a["jobdesk_id"], a["username"], st, a["node"] or "-",
           a["sessions"], a["worker_name"], a["branch"] or "", a["revoked_reason"] or ""))
 ' ;;

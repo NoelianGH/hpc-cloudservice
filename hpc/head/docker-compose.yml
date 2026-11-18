@@ -79,7 +79,8 @@ services:
       NODE_TOKEN: ${NODE_TOKEN:-}
       NODE_SSH_HOST: ${NODE_SSH_HOST:-localhost}
       NODE_SSH_PORT: ${NODE_SSH_PORT:-2222}
-      NODE_MAX_USERS: ${NODE_MAX_USERS:-3}
+      NODE_MAX_USERS: ${NODE_MAX_USERS:-1}
+      NODE_IDLE_MINUTES: ${NODE_IDLE_MINUTES:-30}
       NODE_TOKEN_TTL_DAYS: ${NODE_TOKEN_TTL_DAYS:-7}
       NODE_READ_MAIN: ${NODE_READ_MAIN:-1}
       JOBDESK_AUTO_ASSIGN: ${JOBDESK_AUTO_ASSIGN:-0}
@@ -99,29 +100,38 @@ services:
       db:
         condition: service_healthy
 
-  # Compute node untuk relawan-developer (disediakan platform). Relawan login dari command prompt:
-  #   ssh -p 2222 jd<id>@<alamat-head>   (node1)      ssh -p 2223 jd<id>@<alamat-head>   (node2)
-  # Akses baru ditempatkan di node paling longgar secara bergiliran, maks NODE_MAX_USERS per node.
-  # Node hanya terhubung ke koordinator (jaringan 'nodes'), tidak ke database. User per jobdesk dibuat /
-  # dihapus oleh agen di dalamnya; push repo B hanya lewat gerbang git koordinator.
-  # Tambah node: salin blok node2 (nama, hostname, NODE_NAME, port, volume berbeda).
+  # Compute node untuk relawan-developer (disediakan platform): 5 node, SATU relawan aktif per node
+  # (NODE_MAX_USERS=1), masing-masing dengan Docker uji sendiri (dind1..dind5). Relawan login dari
+  # command prompt PC-nya:  ssh -p 2222 jd<id>@<alamat-head>  (node1; node2 2223 ... node5 2226)
+  # Node mana yang dipakai ditampilkan di website. Node hanya terhubung ke koordinator (jaringan
+  # 'nodes'), tidak ke database. User per jobdesk dibuat / dihapus agen di dalamnya; push repo B hanya
+  # lewat gerbang git koordinator. Folder /home dipakai bersama semua node, jadi pekerjaan relawan
+  # tetap ada walau ia mendapat node lain setelah dilepas karena tidak aktif.
+  # Tambah node: salin blok node5 + dind5 (nama, NODE_NAME, port, volume berbeda).
   node: &node
-    build: ./node
+    build:
+      context: ./node
+      args:
+        DOCKER_CLI_IMAGE: ${DOCKER_CLI_IMAGE:-docker:27-cli}
     image: hpc-head-node
     restart: unless-stopped
     hostname: node1
-    environment:
+    environment: &nodeenv
       COORDINATOR_URL: http://coordinator:8000
       NODE_TOKEN: ${NODE_TOKEN:-}
       NODE_NAME: node1
-      NODE_MAX_USERS: ${NODE_MAX_USERS:-3}
+      NODE_MAX_USERS: ${NODE_MAX_USERS:-1}
       NODE_SSH_PUBLIC_PORT: ${NODE_SSH_PORT:-2222}
+      NODE_TEST_MAX_CONTAINERS: ${NODE_TEST_MAX_CONTAINERS:-5}
+      NODE_TEST_CONTAINER_MEMORY: ${NODE_TEST_CONTAINER_MEMORY:-1g}
+      NODE_TEST_CONTAINER_CPUS: ${NODE_TEST_CONTAINER_CPUS:-1}
     ports:
       - "${NODE_SSH_PORT:-2222}:22"
     networks: [nodes]
     volumes:
-      - nodehome:/home              # pekerjaan relawan tetap ada walau kontainer dibuat ulang
-      - nodekeys:/var/lib/hpc-node  # kunci host SSH tetap sama
+      - nodehome:/home                 # dipakai bersama semua node: pekerjaan relawan ikut pindah node
+      - nodekeys:/var/lib/hpc-node     # kunci host SSH tetap sama
+      - dind1sock:/run/hpc-docker      # socket Docker uji node ini (hanya root di node)
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL, SYS_CHROOT, AUDIT_WRITE, NET_BIND_SERVICE]
     # Program setuid (su, passwd, ...) tidak bisa menaikkan hak akses relawan
@@ -131,21 +141,92 @@ services:
     cpus: ${NODE_CPUS:-1}
     depends_on:
       - coordinator
+      - dind1
 
   node2:
     <<: *node
     hostname: node2
     environment:
-      COORDINATOR_URL: http://coordinator:8000
-      NODE_TOKEN: ${NODE_TOKEN:-}
+      <<: *nodeenv
       NODE_NAME: node2
-      NODE_MAX_USERS: ${NODE_MAX_USERS:-3}
       NODE_SSH_PUBLIC_PORT: ${NODE2_SSH_PORT:-2223}
     ports:
       - "${NODE2_SSH_PORT:-2223}:22"
-    volumes:
-      - node2home:/home
-      - node2keys:/var/lib/hpc-node
+    volumes: [nodehome:/home, node2keys:/var/lib/hpc-node, dind2sock:/run/hpc-docker]
+    depends_on: [coordinator, dind2]
+
+  node3:
+    <<: *node
+    hostname: node3
+    environment:
+      <<: *nodeenv
+      NODE_NAME: node3
+      NODE_SSH_PUBLIC_PORT: ${NODE3_SSH_PORT:-2224}
+    ports:
+      - "${NODE3_SSH_PORT:-2224}:22"
+    volumes: [nodehome:/home, node3keys:/var/lib/hpc-node, dind3sock:/run/hpc-docker]
+    depends_on: [coordinator, dind3]
+
+  node4:
+    <<: *node
+    hostname: node4
+    environment:
+      <<: *nodeenv
+      NODE_NAME: node4
+      NODE_SSH_PUBLIC_PORT: ${NODE4_SSH_PORT:-2225}
+    ports:
+      - "${NODE4_SSH_PORT:-2225}:22"
+    volumes: [nodehome:/home, node4keys:/var/lib/hpc-node, dind4sock:/run/hpc-docker]
+    depends_on: [coordinator, dind4]
+
+  node5:
+    <<: *node
+    hostname: node5
+    environment:
+      <<: *nodeenv
+      NODE_NAME: node5
+      NODE_SSH_PUBLIC_PORT: ${NODE5_SSH_PORT:-2226}
+    ports:
+      - "${NODE5_SSH_PORT:-2226}:22"
+    volumes: [nodehome:/home, node5keys:/var/lib/hpc-node, dind5sock:/run/hpc-docker]
+    depends_on: [coordinator, dind5]
+
+  # Docker uji milik tiap compute node (Docker-in-Docker). Terpisah total dari Docker host yang
+  # menjalankan koordinator / database: jaringan 'nodetest' sendiri (hanya internet), API hanya lewat
+  # socket di volume dindNsock yang di node cuma bisa dibuka root (layanan 'uji'), tanpa port TCP.
+  # Relawan tidak pernah memegang socket ini; kontainernya dibuat runner.py dengan batas tetap.
+  # CATATAN KEAMANAN: dind memakai 'privileged'. Batas utamanya ada di runner.py (tanpa --privileged,
+  # tanpa mount, no-new-privileges, batas RAM/CPU/proses). Di server Linux asli, lebih aman pasang
+  # Sysbox (https://github.com/nestybox/sysbox), lalu ganti 'privileged: true' dengan
+  # 'runtime: sysbox-runc' di blok ini: Docker uji berjalan tanpa hak root host sama sekali.
+  dind1: &dind
+    image: ${DOCKER_DIND_IMAGE:-docker:27-dind}
+    restart: unless-stopped
+    privileged: true
+    command: ["dockerd", "--host=unix:///run/hpc-docker/docker.sock", "--group=root", "--log-level=warn"]
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    networks: [nodetest]
+    volumes: [dind1sock:/run/hpc-docker, dind1data:/var/lib/docker]
+    mem_limit: ${NODE_TEST_MEMORY:-3g}
+    cpus: ${NODE_TEST_CPUS:-2}
+    pids_limit: 4096
+
+  dind2:
+    <<: *dind
+    volumes: [dind2sock:/run/hpc-docker, dind2data:/var/lib/docker]
+
+  dind3:
+    <<: *dind
+    volumes: [dind3sock:/run/hpc-docker, dind3data:/var/lib/docker]
+
+  dind4:
+    <<: *dind
+    volumes: [dind4sock:/run/hpc-docker, dind4data:/var/lib/docker]
+
+  dind5:
+    <<: *dind
+    volumes: [dind5sock:/run/hpc-docker, dind5data:/var/lib/docker]
 
   # Backup database otomatis tiap jam ke folder backup/ (lihat backup/backup.sh)
   backup:
@@ -198,13 +279,53 @@ services:
     depends_on:
       - node2
 
+  tunnel-ssh3:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url ssh://node3:22
+    profiles: ["online"]
+    networks: [nodes]
+    depends_on:
+      - node3
+
+  tunnel-ssh4:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url ssh://node4:22
+    profiles: ["online"]
+    networks: [nodes]
+    depends_on:
+      - node4
+
+  tunnel-ssh5:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url ssh://node5:22
+    profiles: ["online"]
+    networks: [nodes]
+    depends_on:
+      - node5
+
 networks:
   default:
   nodes:
+  nodetest:    # Docker uji node (dind1..5): hanya internet, tidak bisa ke koordinator / database
 
 volumes:
   dbdata:
   nodehome:
   nodekeys:
-  node2home:
   node2keys:
+  node3keys:
+  node4keys:
+  node5keys:
+  dind1sock:
+  dind2sock:
+  dind3sock:
+  dind4sock:
+  dind5sock:
+  dind1data:
+  dind2data:
+  dind3data:
+  dind4data:
+  dind5data:

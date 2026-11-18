@@ -351,7 +351,7 @@ _JD_SQL = """
            d.done_at, d.updated_at, d.pr_number, d.pr_url, d.merged_sha,
            w.name AS worker_name, w.github_username, w.last_seen AS worker_last_seen,
            coalesce((now() - w.last_seen) < interval '60 seconds', false) AS worker_online,
-           na.username AS node_user, na.node AS node_name, na.sessions AS node_sessions,
+           na.username AS node_user, na.node AS node_name, na.sessions AS node_sessions, na.parked_at AS node_parked_at,
            na.provisioned_at IS NOT NULL AS node_ready, na.last_login_at AS node_last_login,
            na.expires_at AS node_expires_at,
            (SELECT x.revoked_reason FROM node_access x WHERE x.jobdesk_id = d.id AND x.status = 'revoked'

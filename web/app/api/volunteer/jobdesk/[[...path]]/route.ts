@@ -5,6 +5,7 @@
  *   POST /api/volunteer/jobdesk/take          ambil jobdesk berikutnya di antrean (FIFO, tidak memilih)
  *   POST /api/volunteer/jobdesk/<id>/submit   ajukan review (CI harus lulus; sistem membuka PR)
  *   POST /api/volunteer/jobdesk/<id>/node-code  ganti token node (password ssh + git) compute node
+ *   POST /api/volunteer/jobdesk/<id>/node-resume  MASUK LAGI KE NODE setelah node dilepas karena tidak aktif
  */
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -13,7 +14,7 @@ import { WORKER_COOKIE } from "@/lib/volunteer";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_POST = [/^take$/, /^\d{1,9}\/submit$/, /^\d{1,9}\/node-code$/];
+const ALLOWED_POST = [/^take$/, /^\d{1,9}\/submit$/, /^\d{1,9}\/node-code$/, /^\d{1,9}\/node-resume$/];
 
 async function proxy(req: Request, path: string[] | undefined, method: "GET" | "POST") {
   const sub = (path || []).join("/");

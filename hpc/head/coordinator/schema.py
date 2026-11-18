@@ -210,6 +210,10 @@ STATEMENTS = [
     # Banyak compute node: port SSH tiap node + giliran penempatan (node paling lama tidak diberi akses)
     "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ssh_port INT",
     "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_assigned_at TIMESTAMPTZ",
+    # Lepas node saat relawan tidak aktif (NODE_IDLE_MINUTES): akses tetap aktif tanpa node ("parkir"),
+    # relawan menekan MASUK LAGI KE NODE di website; node terakhir diutamakan bila kosong
+    "ALTER TABLE node_access ADD COLUMN IF NOT EXISTS parked_at TIMESTAMPTZ",
+    "ALTER TABLE node_access ADD COLUMN IF NOT EXISTS last_node TEXT",
 ]
 
 

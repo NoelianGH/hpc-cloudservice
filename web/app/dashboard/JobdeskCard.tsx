@@ -12,7 +12,8 @@ import TerminalCode from "@/components/TerminalCode";
 type NodeAccess = {
   username: string; token: string; node: string | null; ready: boolean; node_online: boolean;
   sessions: number; last_login_at: string | null; ssh_command: string; ssh_online_command: string | null;
-  expires_at: string | null;
+  expires_at: string | null; parked?: boolean; parked_at?: string | null; last_node?: string | null;
+  idle_minutes?: number;
 };
 
 type Jobdesk = {
@@ -127,7 +128,8 @@ export default function JobdeskCard() {
           </div>
 
           {j.node && <NodeBox n={j.node} showCode={showCode} setShowCode={setShowCode} copied={copied} onCopy={copyCode}
-            onRotate={() => post(`${j.id}/node-code`, "Token node baru dibuat. Sesi SSH yang sedang jalan tidak terputus; git di node memakai token baru.")} busy={busy} />}
+            onRotate={() => post(`${j.id}/node-code`, "Token node baru dibuat. Sesi SSH yang sedang jalan tidak terputus; git di node memakai token baru.")}
+            onResume={() => post(`${j.id}/node-resume`, "Compute node siap untuk Anda. Login lagi dengan perintah ssh di bawah dan token yang sama.")} busy={busy} />}
           {!j.node && j.node_revoked && d.project.node_access && (
             <p className="mt-3 rounded border border-cyber-amber-deep bg-cyber-amber-darkest/40 p-2 text-[11px] text-cyber-amber-bright">
               {j.node_revoked.expired
@@ -187,7 +189,7 @@ export default function JobdeskCard() {
           {d.node_capacity && (
             <p className={`mt-2 text-[10px] ${d.node_capacity.free > 0 ? "text-zinc-500" : "text-cyber-amber-bright"}`}>
               Slot compute node: {d.node_capacity.free} kosong dari {d.node_capacity.total} ({d.node_capacity.nodes} node online).
-              {d.node_capacity.free <= 0 && " Semua penuh: jobdesk tetap di antrean, coba lagi setelah ada jobdesk yang disetujui admin."}
+              {d.node_capacity.free <= 0 && " Semua penuh: jobdesk tetap di antrean. Node dilepas otomatis saat relawan tidak aktif, jadi coba lagi beberapa menit lagi."}
             </p>
           )}
           {d.project.node_access && (
@@ -252,11 +254,13 @@ export default function JobdeskCard() {
   );
 }
 
-function NodeBox({ n, showCode, setShowCode, copied, onCopy, onRotate, busy }: {
+function NodeBox({ n, showCode, setShowCode, copied, onCopy, onRotate, onResume, busy }: {
   n: NodeAccess; showCode: boolean; setShowCode: (v: boolean) => void; copied: boolean;
-  onCopy: (code: string) => void; onRotate: () => void; busy: boolean;
+  onCopy: (code: string) => void; onRotate: () => void; onResume: () => void; busy: boolean;
 }) {
-  const state = !n.node
+  const state = n.parked
+    ? { text: "NODE DILEPAS (TIDAK AKTIF)", cls: "text-cyber-amber-bright" }
+    : !n.node
     ? { text: "MENUNGGU COMPUTE NODE", cls: "text-cyber-amber-bright" }
     : !n.node_online
       ? { text: `COMPUTE NODE ${n.node} OFFLINE`, cls: "text-red-400" }
@@ -272,8 +276,23 @@ function NodeBox({ n, showCode, setShowCode, copied, onCopy, onRotate, busy }: {
         </p>
         <span className="text-[10px] text-zinc-500">user <span className="text-white">{n.username}</span></span>
       </div>
-      <TerminalCode title="Command Prompt / Terminal di PC Anda (jaringan yang sama dengan head)" code={n.ssh_command} />
-      {n.ssh_online_command && (
+      {n.parked ? (
+        <div className="my-3 rounded border border-cyber-amber-deep bg-cyber-amber-darkest/40 p-3 text-[11px] text-cyber-amber-bright">
+          <p>
+            Sesi Anda diputus karena tidak ada aktivitas selama {n.idle_minutes || 30} menit, dan compute node
+            {n.last_node ? ` ${n.last_node}` : ""} dilepas untuk relawan lain. Jobdesk tetap milik Anda, token node tidak
+            berubah, dan folder kerja Anda (termasuk yang belum di-push) tetap ada.
+          </p>
+          <button disabled={busy} onClick={onResume}
+            className={`${btn} mt-2 border-cyber-amber bg-cyber-amber/20 text-cyber-amber-bright hover:bg-cyber-amber/30`}>
+            MASUK LAGI KE NODE
+          </button>
+          <span className="ml-2 text-[10px] text-zinc-400">Bila semua node sedang dipakai, coba lagi beberapa menit lagi.</span>
+        </div>
+      ) : (
+        <TerminalCode title="Command Prompt / Terminal di PC Anda (jaringan yang sama dengan head)" code={n.ssh_command} />
+      )}
+      {!n.parked && n.ssh_online_command && (
         <TerminalCode title="Dari jaringan lain (sekali pasang: winget install Cloudflare.cloudflared)" code={n.ssh_online_command} />
       )}
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -296,8 +315,10 @@ function NodeBox({ n, showCode, setShowCode, copied, onCopy, onRotate, busy }: {
         </p>
       )}
       <p className="mt-2 text-[10px] text-zinc-500">
-        Saat mengetik password di ssh, karakternya memang tidak tampil. Akses ini khusus jobdesk ini: setelah admin menyetujui,
-        sesi SSH diputus dan user {n.username} dihapus. Ambil jobdesk berikutnya di website untuk akses baru.
+        Saat mengetik password di ssh, karakternya memang tidak tampil. Satu compute node dipakai satu relawan; di node, perintah{" "}
+        <code>uji</code> menjalankan kontainer untuk testing (mis. aplikasi + database).
+        {n.idle_minutes ? ` Tidak aktif ${n.idle_minutes} menit = sesi diputus dan node dilepas (jobdesk, token, dan folder tetap).` : ""}
+        {" "}Setelah admin menyetujui, sesi SSH diputus dan user {n.username} dihapus. Ambil jobdesk berikutnya di website untuk akses baru.
       </p>
     </div>
   );

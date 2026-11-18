@@ -7,7 +7,13 @@ yang harus ada di node ini (POST /api/node/agent/sync), lalu menyamakan keadaan:
                       dan sebagai kredensial gerbang git (satu token per jobdesk), clone repo B HANYA
                       branch jobdesk itu;
   - akses dicabut  -> (disetujui / dibatalkan / token kedaluwarsa) putus semua sesi SSH user itu
-                      (kill), hapus user + folder rumahnya.
+                      (kill), hapus user + folder rumahnya + kontainer uji-nya.
+  - tidak aktif    -> agen melaporkan lama tidak aktif tiap user (tidak ada ketikan / keluaran di
+                      terminal, tidak ada proses yang memakai CPU). Lewat NODE_IDLE_MINUTES, koordinator
+                      melepas node: sesi diputus + pesan di terminal, user dihapus dari node ini, tetapi
+                      folder rumah DISIMPAN (volume /home dipakai bersama semua node) dan token tetap.
+Layanan 'uji' (runner.py) berjalan di proses ini: relawan menjalankan kontainer testing di Docker
+milik node (layanan dindN), tanpa pernah memegang socket Docker.
 sshd dijalankan dan dijaga oleh agen ini. Kunci host SSH disimpan di volume agar tetap sama
 setelah kontainer dibuat ulang (relawan tidak melihat peringatan "host key changed").
 
@@ -15,7 +21,7 @@ Variabel lingkungan:
   COORDINATOR_URL  alamat koordinator dari dalam jaringan docker (bawaan http://coordinator:8000)
   NODE_TOKEN       rahasia bersama dengan koordinator
   NODE_NAME        nama node (bawaan hostname kontainer)
-  NODE_MAX_USERS   akses aktif maksimal di node ini
+  NODE_MAX_USERS   akses aktif maksimal di node ini (bawaan 1)
 """
 import json
 import os
@@ -24,14 +30,17 @@ import re
 import shutil
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
 
+import runner   # layanan 'uji' (kontainer testing)
+
 COORD = os.environ.get("COORDINATOR_URL", "http://coordinator:8000").rstrip("/")
 TOKEN = os.environ.get("NODE_TOKEN", "")
 NAME = os.environ.get("NODE_NAME", "").strip() or socket.gethostname()
-MAX_USERS = int(os.environ.get("NODE_MAX_USERS", "3") or 3)
+MAX_USERS = int(os.environ.get("NODE_MAX_USERS", "1") or 1)
 SSH_PUBLIC_PORT = int(os.environ.get("NODE_SSH_PUBLIC_PORT", "0") or 0)   # port node ini di laptop head
 KEY_DIR = "/var/lib/hpc-node/ssh"
 HOME_ROOT = "/home"
@@ -41,6 +50,7 @@ UID_MIN = 20000
 applied: dict[str, str] = {}        # user -> password terakhir yang dipasang
 clone_retry: dict[str, float] = {}  # user -> waktu boleh coba clone lagi
 sshd: subprocess.Popen | None = None
+activity: dict[str, tuple] = {}     # user -> (sidik aktivitas terakhir, sejak kapan tidak berubah)
 
 
 def log(msg):
@@ -95,6 +105,82 @@ def session_counts() -> dict[str, int]:
     return counts
 
 
+def activity_fingerprint(uid: int) -> tuple:
+    """
+    Sidik aktivitas user: waktu baca/tulis terminal (pts) miliknya + total waktu CPU prosesnya,
+    KECUALI proses sshd (keepalive SSH bukan aktivitas). Berubah = relawan masih bekerja.
+    """
+    ptys = []
+    try:
+        names = os.listdir("/dev/pts")
+    except OSError:
+        names = []
+    for n in names:
+        if n.isdigit():
+            try:
+                st = os.stat(f"/dev/pts/{n}")
+            except OSError:
+                continue
+            if st.st_uid == uid:
+                ptys.append((n, int(max(st.st_atime, st.st_mtime))))
+    cpu = 0
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            if os.stat(f"/proc/{pid}").st_uid != uid:
+                continue
+            with open(f"/proc/{pid}/stat") as f:
+                data = f.read()
+        except OSError:
+            continue
+        end = data.rfind(")")
+        if data[data.find("(") + 1:end].startswith("sshd"):
+            continue
+        fields = data[end + 2:].split()
+        cpu += int(fields[11]) + int(fields[12])   # utime + stime
+    return tuple(sorted(ptys)), cpu
+
+
+def idle_seconds(users: list[str]) -> dict[str, int]:
+    now = time.time()
+    out = {}
+    for u in users:
+        try:
+            fp = activity_fingerprint(pwd.getpwnam(u).pw_uid)
+        except KeyError:
+            continue
+        old = activity.get(u)
+        if not old or old[0] != fp:
+            activity[u] = (fp, now)
+        out[u] = int(now - activity[u][1])
+    for u in list(activity):
+        if u not in users:
+            activity.pop(u)
+    return out
+
+
+def tell_user(user: str, text: str):
+    """Tulis pesan ke semua terminal user (sebelum sesinya diputus)."""
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except KeyError:
+        return
+    for n in os.listdir("/dev/pts"):
+        if not n.isdigit():
+            continue
+        try:
+            if os.stat(f"/dev/pts/{n}").st_uid != uid:
+                continue
+            fd = os.open(f"/dev/pts/{n}", os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+            try:
+                os.write(fd, ("\r\n\r\n*** " + text + " ***\r\n\r\n").encode())
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
+
+
 def write_file(path: str, content: str, user: str, mode: int = 0o600):
     try:
         with open(path) as f:
@@ -117,9 +203,12 @@ def motd(g: dict, repo: dict, cloned: bool, err: str | None) -> str:
     lines += [" Simpan kerja : git add -A && git commit -m \"pesan\" && git push",
               " Hanya branch ini yang bisa di-push. Setiap push otomatis di-CI.",
               " Status       : jobdesk          Ajukan review: jobdesk ajukan",
+              " Testing pakai kontainer (mis. app + database): uji   (lihat bantuan)",
               " Setelah admin menyetujui, akses node ini berakhir otomatis."]
     if g.get("expires_at"):
         lines.append(f" Token node berlaku sampai {g['expires_at']}; setelah itu minta admin menerbitkan ulang.")
+    if g.get("idle_minutes"):
+        lines.append(f" Tidak aktif {g['idle_minutes']} menit = sesi diputus & node dilepas (jobdesk, token, folder tetap).")
     lines += [line, ""]
     return "\n".join(lines) + "\n"
 
@@ -189,20 +278,39 @@ def clone(user: str, branch: str, repo: dict, workdir: str):
     log(f"repo {repo['name']} branch {branch} di-clone untuk {user}")
 
 
-def remove_user(user: str, why: str):
+def remove_user(user: str, why: str, keep_home: bool):
     run(["pkill", "-KILL", "-u", user], check=False)
     time.sleep(0.3)
     run(["userdel", "-f", user], check=False)
-    shutil.rmtree(f"{HOME_ROOT}/{user}", ignore_errors=True)
+    if not keep_home:
+        shutil.rmtree(f"{HOME_ROOT}/{user}", ignore_errors=True)
     applied.pop(user, None)
     clone_retry.pop(user, None)
-    log(f"user {user} dihapus, semua sesinya diputus ({why})")
+    activity.pop(user, None)
+    log(f"user {user} dihapus dari node ini, semua sesinya diputus ({why})"
+        + ("; folder rumah disimpan" if keep_home else ""))
+
+
+_tidy_lock = threading.Lock()
+
+
+def tidy_docker(keep: set[str]):
+    """Kontainer uji user yang tidak lagi di node ini dihapus (di thread: Docker bisa lambat)."""
+    def work():
+        if _tidy_lock.acquire(blocking=False):
+            try:
+                runner.tidy(keep)
+            except Exception as e:
+                log(f"membersihkan kontainer uji gagal: {e}")
+            finally:
+                _tidy_lock.release()
+    threading.Thread(target=work, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------- loop
 
 def sync(users: list[str]) -> dict:
-    body = json.dumps({"name": NAME, "users": users, "sessions": session_counts(),
+    body = json.dumps({"name": NAME, "users": users, "sessions": session_counts(), "idle": idle_seconds(users),
                        "max_users": MAX_USERS, "ssh_port": SSH_PUBLIC_PORT or None}).encode()
     req = urllib.request.Request(f"{COORD}/api/node/agent/sync", data=body, method="POST",
                                  headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
@@ -215,25 +323,41 @@ def main():
         log("NODE_TOKEN kosong. Isi di .env head lalu jalankan ulang (./hpc.sh head-up).")
     ensure_host_keys()
     keep_sshd()
+    for d in ("/run/hpc-docker", "/var/lib/hpc-node"):   # socket Docker uji + kunci host: hanya root
+        if os.path.isdir(d):
+            os.chmod(d, 0o700)
+    threading.Thread(target=runner.serve, daemon=True).start()
     log(f"siap, koordinator {COORD}, maks {MAX_USERS} relawan")
-    interval, warned = 3, 0.0
+    interval, warned, last_tidy = 3, 0.0, 0.0
     while True:
         keep_sshd()
         try:
             state = sync(present_users())
             interval = state.get("interval_s", 3)
             grants = {g["user"]: g for g in state["grants"]}
+            # Folder rumah ada di volume bersama semua node: hanya dihapus bila aksesnya sudah dicabut
+            keep = set(state.get("keep_users", grants)) | set(grants)
             for g in grants.values():
+                g.setdefault("idle_minutes", state.get("idle_minutes"))
                 try:
                     ensure_user(g, state["repo"])
                 except Exception as e:
                     log(f"menyiapkan {g['user']} gagal: {e}")
+            removed = False
             for user in present_users():
                 if user not in grants:
-                    remove_user(user, "akses dicabut / dipindah")
-            for d in os.listdir(HOME_ROOT):   # sisa folder rumah dari akses lama (kontainer dibuat ulang)
-                if USER_RE.match(d) and d not in grants:
+                    note = (state.get("notices") or {}).get(user)
+                    tell_user(user, note or "Akses compute node ini berakhir (jobdesk disetujui / dibatalkan / dicabut).")
+                    time.sleep(0.2)
+                    remove_user(user, "tidak aktif, node dilepas" if note else "akses dicabut / dipindah",
+                                keep_home=user in keep)
+                    removed = True
+            for d in os.listdir(HOME_ROOT):   # sisa folder rumah dari akses yang sudah dicabut
+                if USER_RE.match(d) and d not in keep:
                     shutil.rmtree(f"{HOME_ROOT}/{d}", ignore_errors=True)
+            if removed or time.time() - last_tidy > 60:
+                last_tidy = time.time()
+                tidy_docker(set(grants))
         except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
             if time.time() - warned > 60:
                 log(f"koordinator belum bisa dihubungi: {e}")

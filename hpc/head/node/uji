@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""
+uji - menjalankan kontainer untuk testing di compute node (lihat 'uji' tanpa argumen).
+Perintah ini tidak memegang Docker: permintaan + terminal Anda dikirim ke layanan uji node
+(root), yang memeriksa identitas Anda dan menjalankan kontainer dengan batas keamanan.
+"""
+import json
+import os
+import signal
+import socket
+import sys
+
+SOCK = "/run/hpc-uji.sock"
+
+
+def main():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(SOCK)
+    except OSError:
+        sys.exit("uji: layanan uji di node ini belum siap. Coba lagi sebentar.")
+    tty = os.isatty(0) and os.isatty(1)
+    req = json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "tty": tty}).encode()
+    if len(req) > 60000:
+        sys.exit("uji: argumen terlalu panjang.")
+    # Ctrl+C (tanpa terminal mentah): tutup koneksi -> layanan menghentikan kontainer
+    signal.signal(signal.SIGINT, lambda *_: os._exit(130))
+    socket.send_fds(s, [req], [0, 1, 2])
+    data = b""
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    try:
+        code = int(json.loads(data.decode() or "{}").get("code", 1))
+    except ValueError:
+        code = 1
+    if code == 126:
+        sys.exit("uji: hanya untuk akun relawan di compute node.")
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()
