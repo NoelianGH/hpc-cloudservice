@@ -6,7 +6,9 @@ Aturan (bisa diubah lewat .env):
   - Kredit hanya bertambah bila hasil worker SAMA dengan quorum (lihat validator.py).
   - Lencana menurut total kredit: Perintis >= 1, Perunggu >= 25, Perak >= 100, Emas >= 250.
   - Sertifikat bisa diambil bila kredit >= CERT_MIN_CREDITS (bawaan 50) dan
-    rasio hasil ditolak <= CERT_MAX_REJECT_PCT persen (bawaan 10).
+    hasil diterima >= CERT_MIN_ACCEPT_PCT persen (bawaan 90). Hasil diterima =
+    review jobdesk yang langsung disetujui admin dibanding yang diminta revisi;
+    belum ada review = belum ada yang ditolak, jadi tidak menghalangi.
   - Sertifikat punya kode unik; siapa pun bisa memeriksa keasliannya di
     /api/certificates/<kode> (web: /certificate/<kode>).
 
@@ -27,7 +29,7 @@ from common import db
 from volunteer_auth import check_volunteer_auth
 
 CERT_MIN_CREDITS = int(os.environ.get("CERT_MIN_CREDITS", "50") or 50)
-CERT_MAX_REJECT_PCT = float(os.environ.get("CERT_MAX_REJECT_PCT", "10") or 10)
+CERT_MIN_ACCEPT_PCT = float(os.environ.get("CERT_MIN_ACCEPT_PCT", "90") or 90)
 PROJECT_NAME = os.environ.get("PROJECT_NAME", "Cloud Service HPC - Volunteer Computing")
 
 BADGES = [(250, "Emas"), (100, "Perak"), (25, "Perunggu"), (1, "Perintis")]
@@ -71,16 +73,33 @@ def _reject_pct(s: dict) -> float:
     return round(100.0 * s["tasks_rejected"] / total, 1) if total else 0.0
 
 
-def _eligibility(s: dict) -> dict:
+def _reviews(c, worker_id: str) -> dict:
+    """Jobdesk relawan: jumlah selesai/aktif dan hasil review admin (disetujui vs diminta revisi)."""
+    jd = c.execute("""
+        SELECT count(*) FILTER (WHERE status = 'done') AS done,
+               count(*) FILTER (WHERE status IN ('in_progress', 'review')) AS active
+          FROM jobdesks WHERE worker_id = %s""", (worker_id,)).fetchone()
+    rv = c.execute("""
+        SELECT count(*) FILTER (WHERE e.event = 'approve') AS approved,
+               count(*) FILTER (WHERE e.event = 'revise') AS revised
+          FROM jobdesk_events e JOIN jobdesks d ON d.id = e.jobdesk_id
+         WHERE d.worker_id = %s""", (worker_id,)).fetchone()
+    reviewed = rv["approved"] + rv["revised"]
+    return {"jobdesks_done": jd["done"], "jobdesks_active": jd["active"],
+            "reviews_approved": rv["approved"], "reviews_revised": rv["revised"],
+            "accept_pct": round(100 * rv["approved"] / reviewed) if reviewed else None}
+
+
+def _eligibility(s: dict, rv: dict) -> dict:
     reasons = []
     if s["credits"] < CERT_MIN_CREDITS:
         reasons.append(f"Kredit {s['credits']}/{CERT_MIN_CREDITS}")
-    if _reject_pct(s) > CERT_MAX_REJECT_PCT:
-        reasons.append(f"Hasil ditolak {_reject_pct(s)}% (maks {CERT_MAX_REJECT_PCT:g}%)")
+    if rv["accept_pct"] is not None and rv["accept_pct"] < CERT_MIN_ACCEPT_PCT:
+        reasons.append(f"Hasil diterima {rv['accept_pct']}% (min {CERT_MIN_ACCEPT_PCT:g}%)")
     if not s.get("github_username"):
         reasons.append("Worker belum terverifikasi GitHub + OTP")
     return {"eligible": not reasons, "missing": reasons, "min_credits": CERT_MIN_CREDITS,
-            "max_reject_pct": CERT_MAX_REJECT_PCT,
+            "min_accept_pct": CERT_MIN_ACCEPT_PCT,
             "progress_pct": min(100, round(100 * s["credits"] / CERT_MIN_CREDITS)) if CERT_MIN_CREDITS else 100}
 
 
@@ -114,7 +133,7 @@ def leaderboard(limit: int = 50):
     return {"leaderboard": out, "totals": {**totals, "certificates": certs["n"]},
             "rules": {"badges": [{"name": n, "credits": l} for l, n in reversed(BADGES)],
                       "certificate_min_credits": CERT_MIN_CREDITS,
-                      "certificate_max_reject_pct": CERT_MAX_REJECT_PCT}}
+                      "certificate_min_accept_pct": CERT_MIN_ACCEPT_PCT}}
 
 
 def _individual(authorization: str | None) -> dict:
@@ -147,6 +166,7 @@ def me(authorization: str = Header(None)):
             WHERE a.worker_id = %s ORDER BY a.id DESC LIMIT 25""", (w["id"],)).fetchall()
         cert = c.execute("SELECT code, issued_at, updated_at, credits FROM certificates WHERE worker_id = %s",
                          (w["id"],)).fetchone()
+        rv = _reviews(c, w["id"])
         acc = c.execute("""
             SELECT password_hash IS NOT NULL AS has_password,
                    appreciation_consent_at IS NOT NULL AS has_consented,
@@ -175,8 +195,9 @@ def me(authorization: str = Header(None)):
                   "badge": badge(s["credits"]), "next_badge": next_badge(s["credits"]),
                   "tasks_validated": s["tasks_validated"], "tasks_rejected": s["tasks_rejected"],
                   "tasks_expired": s["tasks_expired"], "reject_pct": _reject_pct(s),
-                  "jobs_joined": s["jobs_joined"], "compute_seconds": round(float(s["compute_seconds"] or 0))},
-        "certificate": {**_eligibility(s), "issued": cert},
+                  "jobs_joined": s["jobs_joined"], "compute_seconds": round(float(s["compute_seconds"] or 0)),
+                  **rv},
+        "certificate": {**_eligibility(s, rv), "issued": cert},
         "recent": recent,
     }
 
@@ -187,7 +208,8 @@ def issue_certificate(authorization: str = Header(None)):
     w = _individual(authorization)
     with db() as c:
         s = c.execute(_STATS_SQL + " WHERE w.id = %s GROUP BY w.id", (w["id"],)).fetchone()
-        el = _eligibility(s)
+        rv = _reviews(c, w["id"])
+        el = _eligibility(s, rv)
         if not el["eligible"]:
             raise HTTPException(400, {"message": "Belum memenuhi syarat sertifikat.", "missing": el["missing"]})
         
@@ -201,13 +223,16 @@ def issue_certificate(authorization: str = Header(None)):
 
         code = "HPC-" + secrets.token_hex(5).upper()
         cert = c.execute("""
-            INSERT INTO certificates (code, worker_id, worker_name, github_username, credits, tasks_validated)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO certificates (code, worker_id, worker_name, github_username, credits, tasks_validated,
+                                      jobdesks_done)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (worker_id) DO UPDATE
                SET worker_name = EXCLUDED.worker_name, github_username = EXCLUDED.github_username,
-                   credits = EXCLUDED.credits, tasks_validated = EXCLUDED.tasks_validated, updated_at = now()
-            RETURNING code, issued_at, updated_at, credits, tasks_validated""",
-            (code, w["id"], cert_worker_name, w["github_username"], s["credits"], s["tasks_validated"])).fetchone()
+                   credits = EXCLUDED.credits, tasks_validated = EXCLUDED.tasks_validated,
+                   jobdesks_done = EXCLUDED.jobdesks_done, updated_at = now()
+            RETURNING code, worker_name, issued_at, updated_at, credits, tasks_validated, jobdesks_done""",
+            (code, w["id"], cert_worker_name, w["github_username"], s["credits"], s["tasks_validated"],
+             rv["jobdesks_done"])).fetchone()
     print(f"[SERTIFIKAT] {cert['code']} untuk {cert['worker_name']} @{w['github_username']} ({cert['credits']} kredit)", flush=True)
     return {"ok": True, **cert}
 
@@ -220,7 +245,7 @@ def verify_certificate(code: str):
         raise HTTPException(404, "Sertifikat tidak ditemukan")
     with db() as c:
         cert = c.execute("""
-            SELECT ce.code, ce.worker_name, ce.github_username, ce.credits, ce.tasks_validated,
+            SELECT ce.code, ce.worker_name, ce.github_username, ce.credits, ce.tasks_validated, ce.jobdesks_done,
                    ce.issued_at, ce.updated_at, w.status AS worker_status
             FROM certificates ce JOIN workers w ON w.id = ce.worker_id WHERE ce.code = %s""", (code,)).fetchone()
     if not cert:

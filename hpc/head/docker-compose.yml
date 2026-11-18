@@ -45,7 +45,7 @@ services:
       RESULTS_BRANCH_PREFIX: ${RESULTS_BRANCH_PREFIX:-results/job-}
       # Insentif relawan
       CERT_MIN_CREDITS: ${CERT_MIN_CREDITS:-50}
-      CERT_MAX_REJECT_PCT: ${CERT_MAX_REJECT_PCT:-10}
+      CERT_MIN_ACCEPT_PCT: ${CERT_MIN_ACCEPT_PCT:-90}
       VALIDATOR_TICK_SECONDS: ${VALIDATOR_TICK_SECONDS:-1}
       # Proyek perangkat lunak (repo B) yang dikerjakan relawan + CI terdistribusi
       PROJECT_REPO_URL: ${PROJECT_REPO_URL:-}

@@ -67,6 +67,9 @@ STATEMENTS = [
         issued_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT now())""",
 
+    # Sertifikat juga mencatat jobdesk yang diselesaikan (relawan developer)
+    "ALTER TABLE certificates ADD COLUMN IF NOT EXISTS jobdesks_done INT NOT NULL DEFAULT 0",
+
     # Log keluaran tugas (tidak ikut di-hash; mis. output build/test yang berisi waktu)
     "ALTER TABLE assignments ADD COLUMN IF NOT EXISTS log TEXT",
 

@@ -25,7 +25,7 @@ Target uji: **minimal 5–10 relawan aktif** (kriteria keberhasilan proposal: �
 | **Kredit tervalidasi** | +1 kredit (atau `credit_per_task` job) per tugas yang hasilnya sama dengan quorum. Hasil palsu tidak memberi kredit. (`head/coordinator/validator.py`) |
 | **Lencana** | Perintis ≥ 1, Perunggu ≥ 25, Perak ≥ 100, Emas ≥ 250 kredit. (`head/coordinator/volunteer.py`) |
 | **Leaderboard publik** | `/leaderboard` di web dan `./hpc.sh leaderboard`: peringkat, kredit, tugas valid, persentase ditolak, menit komputasi. Email tidak pernah ditampilkan. |
-| **Sertifikat kontributor** | Bisa diambil di dashboard relawan bila kredit ≥ `CERT_MIN_CREDITS` (bawaan 50) dan hasil ditolak ≤ `CERT_MAX_REJECT_PCT` (bawaan 10%). Setiap sertifikat punya kode `HPC-XXXXXXXXXX` yang bisa diverifikasi publik di `/certificate/<kode>`; bisa dicetak/disimpan sebagai PDF. Sertifikat otomatis tampil "DICABUT" bila worker ditangguhkan admin. |
+| **Sertifikat kontributor** | Bisa diambil di dashboard relawan bila kredit ≥ `CERT_MIN_CREDITS` (bawaan 50) dan hasil diterima ≥ `CERT_MIN_ACCEPT_PCT` (bawaan 90%; persentase review jobdesk yang langsung disetujui admin, bukan diminta revisi). Setiap sertifikat punya kode `HPC-XXXXXXXXXX` yang bisa diverifikasi publik di `/certificate/<kode>`; bisa dicetak/disimpan sebagai PDF. Sertifikat otomatis tampil "DICABUT" bila worker ditangguhkan admin. |
 | **Pengalaman praktis** | Docker, WSL2, sandboxing, sistem terdistribusi. Cocok untuk portofolio/CV/LinkedIn. |
 | **Kontrol penuh** | Worker dibatasi 1 CPU / 512 MB (bisa diubah di `.env`), bisa dimatikan kapan saja. Tugas yang terputus otomatis dialihkan ke relawan lain. |
 

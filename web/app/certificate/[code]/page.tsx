@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 
 type Cert = {
   valid: boolean; project: string; badge: string | null; code: string; worker_name: string;
-  github_username: string | null; credits: number; tasks_validated: number; issued_at: string; updated_at: string;
+  github_username: string | null; credits: number; tasks_validated: number; jobdesks_done?: number; issued_at: string; updated_at: string;
 };
 
 /** Sertifikat kontributor yang bisa dicetak (Ctrl+P) dan diverifikasi publik lewat kodenya. */
@@ -46,8 +46,9 @@ export default function CertificatePage() {
         <div className="mt-2 text-3xl font-bold">{cert.worker_name}</div>
         {cert.github_username && <div className="mt-1 text-sm text-zinc-600">github.com/{cert.github_username}</div>}
         <p className="mx-auto mt-6 max-w-xl text-sm leading-relaxed text-zinc-700">
-          atas kontribusi sumber daya komputasi sebagai relawan, dengan <b>{cert.credits} kredit</b> dari{" "}
-          <b>{cert.tasks_validated} tugas</b> yang hasilnya tervalidasi melalui replikasi dan quorum
+          atas kontribusinya sebagai relawan, dengan <b>{cert.credits} kredit</b> dari{" "}
+          <b>{cert.jobdesks_done ?? 0} jobdesk</b> yang disetujui dan di-merge serta{" "}
+          <b>{cert.tasks_validated} tugas komputasi</b> yang hasilnya tervalidasi melalui replikasi dan quorum
           {cert.badge ? <> (lencana <b>{cert.badge}</b>)</> : null}.
         </p>
         <div className="mt-8 text-xs text-zinc-500">

@@ -35,12 +35,17 @@ type Me = {
     reject_pct: number;
     jobs_joined: number;
     compute_seconds: number;
+    jobdesks_done?: number;
+    jobdesks_active?: number;
+    reviews_approved?: number;
+    reviews_revised?: number;
+    accept_pct?: number | null;
   };
   certificate: {
     eligible: boolean;
     missing: string[];
     min_credits: number;
-    max_reject_pct: number;
+    min_accept_pct: number;
     progress_pct: number;
     issued: { code: string; issued_at: string; credits: number } | null;
   };
@@ -554,14 +559,14 @@ export default function DashboardPage() {
                   />
                   <Stat
                     label="TUGAS SELESAI"
-                    value={s.tasks_validated}
-                    sub={`${s.jobs_joined} job • ${Math.round(s.compute_seconds / 60)} menit`}
+                    value={s.jobdesks_done ?? 0}
+                    sub={`${s.jobdesks_active ?? 0} sedang dikerjakan • ${s.tasks_validated} tugas CI/komputasi`}
                   />
                   <Stat
-                    label="HASIL DITOLAK"
-                    value={`${s.reject_pct}%`}
-                    accent={s.tasks_rejected ? "text-red-300" : "text-emerald-400"}
-                    sub={`${s.tasks_rejected} ditolak • ${s.tasks_expired} expired`}
+                    label="HASIL DITERIMA"
+                    value={s.accept_pct == null ? "-" : `${s.accept_pct}%`}
+                    accent={s.accept_pct == null ? undefined : "text-emerald-400"}
+                    sub={`${s.reviews_approved ?? 0} disetujui • ${s.reviews_revised ?? 0} diminta revisi`}
                   />
                 </div>
 
@@ -576,7 +581,7 @@ export default function DashboardPage() {
                       <div className="h-2 rounded bg-cyber-amber transition-all duration-500" style={{ width: `${cert.progress_pct}%` }} />
                     </div>
                     <p className="text-[11px] text-zinc-400 leading-relaxed font-mono">
-                      Syarat: kredit &ge; {cert.min_credits} &amp; hasil ditolak &le; {cert.max_reject_pct}%. Progres: {cert.progress_pct}%.
+                      Syarat: kredit &ge; {cert.min_credits} &amp; hasil diterima &ge; {cert.min_accept_pct}%. Progres: {cert.progress_pct}%.
                     </p>
                     {cert.issued ? (
                       <div className="space-y-2 text-xs pt-1">
@@ -1062,8 +1067,10 @@ export default function DashboardPage() {
                       <p className="mx-auto max-w-xl font-sans text-xs text-zinc-300 leading-relaxed pt-2">
                         Atas dedikasi sumber daya komputasi ilmiah dengan perolehan{" "}
                         <span className="font-bold text-cyber-amber-bright">{s.credits} kredit</span> dari{" "}
-                        <span className="font-bold text-white">{s.tasks_validated} tugas tervalidasi</span>{" "}
-                        (tingkat penolakan: <span className="font-bold text-emerald-400">{s.reject_pct}%</span>).
+                        <span className="font-bold text-white">{s.jobdesks_done ?? 0} jobdesk selesai</span> dan{" "}
+                        <span className="font-bold text-white">{s.tasks_validated} tugas komputasi tervalidasi</span>{" "}
+                        (hasil diterima:{" "}
+                        <span className="font-bold text-emerald-400">{s.accept_pct == null ? "-" : `${s.accept_pct}%`}</span>).
                       </p>
 
                       <div className="pt-3 border-t border-cyber-border/60 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-zinc-400">
