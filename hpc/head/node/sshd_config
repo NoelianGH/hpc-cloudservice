@@ -18,8 +18,10 @@ LoginGraceTime 30
 # Batasi koneksi yang belum login (tebak password massal)
 MaxStartups 10:30:60
 MaxSessions 4
-# Tidak ada terowongan dari node ke jaringan internal platform
-AllowTcpForwarding no
+# Hanya izinkan forwarding ke loopback node sendiri (127.0.0.1 / ::1) untuk VS Code / Antigravity Remote-SSH;
+# terowongan ke koordinator / jaringan internal platform tetap diblokir.
+AllowTcpForwarding local
+PermitOpen 127.0.0.1:* [::1]:*
 AllowStreamLocalForwarding no
 AllowAgentForwarding no
 GatewayPorts no

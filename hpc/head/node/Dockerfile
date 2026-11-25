@@ -9,7 +9,7 @@ FROM ${DOCKER_CLI_IMAGE} AS dockercli
 
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        openssh-server git ca-certificates procps nano vim-tiny less curl \
+        openssh-server git ca-certificates procps nano vim-tiny less curl wget \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd /var/lib/hpc-node \
     && groupadd relawan \
