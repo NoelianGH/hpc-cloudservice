@@ -9,6 +9,8 @@ Aturan (bisa diubah lewat .env):
     hasil diterima >= CERT_MIN_ACCEPT_PCT persen (bawaan 90). Hasil diterima =
     review jobdesk yang langsung disetujui admin dibanding yang diminta revisi;
     belum ada review = belum ada yang ditolak, jadi tidak menghalangi.
+  - PDF sertifikat: sertifikat/template.png diisi nama lengkap registrasi (First Name + Last Name)
+    oleh certificate_pdf.py. Membuka PDF saat sudah memenuhi syarat otomatis menerbitkan sertifikat.
   - Sertifikat punya kode unik; siapa pun bisa memeriksa keasliannya di
     /api/certificates/<kode> (web: /certificate/<kode>).
 
@@ -16,15 +18,18 @@ Endpoint:
   GET  /api/leaderboard              publik
   GET  /api/me                       token worker individual (hpc_w_...)
   POST /api/me/certificate           token worker individual
+  GET  /api/me/certificate.pdf       sesi web relawan: PDF sertifikat (template PNG + nama lengkap)
   GET  /api/certificates/{code}      publik
 Endpoint relawan menerima sesi web (login email + password) maupun token worker pribadi.
 """
 import os
+import re
 import secrets
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
 from pydantic import BaseModel
 
+from certificate_pdf import render_certificate
 from common import db
 from volunteer_auth import check_volunteer_auth
 
@@ -202,6 +207,31 @@ def me(authorization: str = Header(None)):
     }
 
 
+def _registration_name(c, worker_id: str, fallback: str = "") -> str:
+    """Nama lengkap saat registrasi (First Name + Last Name); akun lama tanpa nama jatuh ke
+    username / nama worker."""
+    r = c.execute("SELECT name, username, first_name, last_name FROM workers WHERE id = %s",
+                  (worker_id,)).fetchone() or {}
+    full = " ".join(p.strip() for p in (r.get("first_name"), r.get("last_name")) if p and p.strip())
+    return full or (r.get("username") or "").strip() or (r.get("name") or "").strip() or fallback
+
+
+def _upsert_certificate(c, w: dict, s: dict, rv: dict) -> dict:
+    """Terbitkan sertifikat, atau perbarui nama & angka pada sertifikat yang sudah ada (kode tetap)."""
+    code = "HPC-" + secrets.token_hex(5).upper()
+    return c.execute("""
+        INSERT INTO certificates (code, worker_id, worker_name, github_username, credits, tasks_validated,
+                                  jobdesks_done)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (worker_id) DO UPDATE
+           SET worker_name = EXCLUDED.worker_name, github_username = EXCLUDED.github_username,
+               credits = EXCLUDED.credits, tasks_validated = EXCLUDED.tasks_validated,
+               jobdesks_done = EXCLUDED.jobdesks_done, updated_at = now()
+        RETURNING code, worker_name, issued_at, updated_at, credits, tasks_validated, jobdesks_done""",
+        (code, w["id"], _registration_name(c, w["id"], w.get("name") or ""), w["github_username"],
+         s["credits"], s["tasks_validated"], rv["jobdesks_done"])).fetchone()
+
+
 @router.post("/api/me/certificate")
 def issue_certificate(authorization: str = Header(None)):
     """Terbitkan (atau perbarui angka pada) sertifikat kontributor bila syarat terpenuhi."""
@@ -212,29 +242,49 @@ def issue_certificate(authorization: str = Header(None)):
         el = _eligibility(s, rv)
         if not el["eligible"]:
             raise HTTPException(400, {"message": "Belum memenuhi syarat sertifikat.", "missing": el["missing"]})
-        
-        # Ambil nama relawan dengan format 'first_name last_name'
-        w_row = c.execute("SELECT name, first_name, last_name, github_username FROM workers WHERE id = %s", (w["id"],)).fetchone()
-        cert_worker_name = (
-            f"{w_row['first_name']} {w_row['last_name']}".strip()
-            if w_row and w_row.get("first_name")
-            else (w_row["name"] if w_row else w["name"])
-        )
-
-        code = "HPC-" + secrets.token_hex(5).upper()
-        cert = c.execute("""
-            INSERT INTO certificates (code, worker_id, worker_name, github_username, credits, tasks_validated,
-                                      jobdesks_done)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (worker_id) DO UPDATE
-               SET worker_name = EXCLUDED.worker_name, github_username = EXCLUDED.github_username,
-                   credits = EXCLUDED.credits, tasks_validated = EXCLUDED.tasks_validated,
-                   jobdesks_done = EXCLUDED.jobdesks_done, updated_at = now()
-            RETURNING code, worker_name, issued_at, updated_at, credits, tasks_validated, jobdesks_done""",
-            (code, w["id"], cert_worker_name, w["github_username"], s["credits"], s["tasks_validated"],
-             rv["jobdesks_done"])).fetchone()
+        cert = _upsert_certificate(c, w, s, rv)
     print(f"[SERTIFIKAT] {cert['code']} untuk {cert['worker_name']} @{w['github_username']} ({cert['credits']} kredit)", flush=True)
     return {"ok": True, **cert}
+
+
+_BASE_RE = re.compile(r"^https?://[A-Za-z0-9.\-]+(:\d{1,5})?$")
+
+
+@router.get("/api/me/certificate.pdf")
+def certificate_pdf(download: bool = False, base: str | None = None, authorization: str = Header(None)):
+    """
+    Sertifikat kontributor dalam bentuk PDF: template PNG (sertifikat/template.png) diisi nama
+    lengkap registrasi relawan, lalu dijadikan PDF A4 lanskap.
+    - Memenuhi syarat (poin >= CERT_MIN_CREDITS, bawaan 50): sertifikat otomatis diterbitkan bila
+      belum ada, atau nama & angkanya diperbarui, lalu PDF dikirim.
+    - Belum memenuhi syarat dan belum pernah terbit: 403 berisi syarat yang kurang.
+    - Sudah pernah terbit tetapi kini tidak memenuhi syarat (mis. persentase diterima turun):
+      PDF sertifikat yang sudah terbit tetap bisa diunduh.
+    Query: download=1 -> unduh sebagai lampiran; base=https://situs-web -> alamat verifikasi di kaki sertifikat.
+    """
+    w = _individual(authorization)
+    with db() as c:
+        s = c.execute(_STATS_SQL + " WHERE w.id = %s GROUP BY w.id", (w["id"],)).fetchone()
+        rv = _reviews(c, w["id"])
+        el = _eligibility(s, rv)
+        if el["eligible"]:
+            cert = _upsert_certificate(c, w, s, rv)
+        else:
+            cert = c.execute("SELECT code, worker_name, issued_at FROM certificates WHERE worker_id = %s",
+                             (w["id"],)).fetchone()
+            if not cert:
+                raise HTTPException(403, {"message": f"Sertifikat terbuka setelah mengumpulkan {CERT_MIN_CREDITS} poin.",
+                                          "missing": el["missing"], "credits": s["credits"],
+                                          "min_credits": CERT_MIN_CREDITS})
+    base = (base or "").strip().rstrip("/")
+    verify = f"{base}/certificate/{cert['code']}" if base and len(base) <= 100 and _BASE_RE.match(base) else None
+    pdf = render_certificate(cert["worker_name"], cert["code"], cert["issued_at"], verify)
+    fname = f"Sertifikat-{cert['code']}.pdf"
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'{"attachment" if download else "inline"}; filename="{fname}"',
+        "Cache-Control": "private, no-store",
+        "X-Certificate-Code": cert["code"],
+    })
 
 
 @router.get("/api/certificates/{code}")

@@ -106,6 +106,56 @@ function Stat({
   );
 }
 
+/**
+ * Tombol sertifikat PDF. Sertifikat dibuat koordinator dari template PNG + nama lengkap registrasi,
+ * lalu dibuka di TAB BARU (/api/volunteer/certificate/pdf). Membukanya saat poin sudah cukup
+ * sekaligus menerbitkan sertifikat; sebelum itu tombol terkunci dan menampilkan sisa poin.
+ */
+function CertificatePdfButtons({
+  cert,
+  credits,
+  compact = false,
+}: {
+  cert: Me["certificate"];
+  credits: number;
+  compact?: boolean;
+}) {
+  const open = cert.eligible || Boolean(cert.issued);
+  const size = compact ? "px-3.5 py-1.5 text-xs rounded" : "px-4 py-2 text-xs rounded-lg";
+  if (!open) {
+    const left = Math.max(0, cert.min_credits - credits);
+    return (
+      <button
+        type="button"
+        disabled
+        title={left > 0 ? `Kumpulkan ${left} poin lagi untuk membuka sertifikat.` : "Syarat sertifikat belum terpenuhi."}
+        className={`${size} ${compact ? "w-full" : ""} cursor-not-allowed border border-cyber-border bg-cyber-black font-mono font-bold text-zinc-500`}
+      >
+        🔒 SERTIFIKAT PDF • {Math.min(credits, cert.min_credits)}/{cert.min_credits} POIN
+      </button>
+    );
+  }
+  return (
+    <div className={`flex flex-wrap gap-2 ${compact && !cert.issued ? "w-full" : ""}`}>
+      <a
+        href="/api/volunteer/certificate/pdf"
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`${size} ${compact && !cert.issued ? "flex-1 text-center" : ""} inline-flex items-center justify-center gap-2 border border-cyber-amber bg-cyber-amber font-mono font-bold text-cyber-void shadow-amber-glow hover:bg-cyber-amber-bright transition-all`}
+      >
+        <span>{cert.issued ? "BUKA SERTIFIKAT (PDF)" : "AMBIL SERTIFIKAT (PDF)"}</span>
+        <span aria-hidden>↗</span>
+      </a>
+      <a
+        href="/api/volunteer/certificate/pdf?download=1"
+        className={`${size} inline-flex items-center justify-center border border-cyber-amber/70 font-mono font-bold text-cyber-amber-bright hover:bg-cyber-amber/10 transition-colors`}
+      >
+        UNDUH
+      </a>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "progress" | "profile">("dashboard");
   const [me, setMe] = useState<Me | null>(null);
@@ -586,12 +636,13 @@ export default function DashboardPage() {
                     {cert.issued ? (
                       <div className="space-y-2 text-xs pt-1">
                         <p className="text-emerald-400 font-mono">Kode Sertifikat: {cert.issued.code}</p>
-                        <div className="flex gap-2">
+                        <CertificatePdfButtons cert={cert} credits={s.credits} compact />
+                        <div className="flex flex-wrap gap-2">
                           <Link
                             href={`/certificate/${cert.issued.code}`}
-                            className="rounded border border-cyber-amber bg-cyber-amber px-3.5 py-1.5 font-bold font-mono text-xs text-cyber-void hover:bg-cyber-amber-bright transition-all"
+                            className="rounded border border-cyber-border px-3.5 py-1.5 font-mono text-xs text-zinc-300 hover:border-cyber-amber transition-colors"
                           >
-                            LIHAT / CETAK
+                            HALAMAN VERIFIKASI
                           </Link>
                           {cert.eligible && (
                             <button
@@ -606,20 +657,16 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     ) : cert.eligible ? (
-                      <button
-                        type="button"
-                        onClick={claimCertificate}
-                        disabled={busy}
-                        className="w-full rounded border border-cyber-amber bg-cyber-amber py-2 text-xs font-bold font-mono text-cyber-void hover:bg-cyber-amber-bright shadow-amber-glow disabled:opacity-50 transition-all"
-                      >
-                        {busy ? "MENERBITKAN..." : "KLAIM SERTIFIKAT SEKARANG"}
-                      </button>
+                      <CertificatePdfButtons cert={cert} credits={s.credits} compact />
                     ) : (
-                      <ul className="list-disc pl-4 text-[11px] text-zinc-500 font-mono space-y-1">
-                        {cert.missing.map((m) => (
-                          <li key={m}>{m}</li>
-                        ))}
-                      </ul>
+                      <>
+                        <ul className="list-disc pl-4 text-[11px] text-zinc-500 font-mono space-y-1">
+                          {cert.missing.map((m) => (
+                            <li key={m}>{m}</li>
+                          ))}
+                        </ul>
+                        <CertificatePdfButtons cert={cert} credits={s.credits} compact />
+                      </>
                     )}
                     {certMsg && <p className="text-[11px] text-red-300 font-mono">{certMsg}</p>}
                   </div>
@@ -1012,15 +1059,15 @@ export default function DashboardPage() {
                       </div>
 
                       {/* Tombol Aksi */}
-                      <div className="flex items-center gap-2 self-start sm:self-auto">
-                        {cert.issued ? (
-                          <>
+                      <div className="flex flex-col items-start gap-2 self-start sm:items-end sm:self-auto">
+                        <CertificatePdfButtons cert={cert} credits={s.credits} />
+                        {cert.issued && (
+                          <div className="flex items-center gap-2">
                             <Link
                               href={`/certificate/${cert.issued.code}`}
-                              className="inline-flex items-center space-x-2 rounded-lg border border-cyber-amber bg-cyber-amber px-4 py-2 font-mono text-xs font-bold text-cyber-void shadow-amber-glow hover:bg-cyber-amber-bright hover:shadow-amber-glow-lg transition-all"
+                              className="inline-flex items-center rounded-lg border border-cyber-border bg-cyber-surface px-3 py-2 font-mono text-xs text-zinc-300 hover:border-cyber-amber hover:text-white transition-colors"
                             >
-                              <span>LIHAT / CETAK SERTIFIKAT</span>
-                              <span>&rarr;</span>
+                              HALAMAN VERIFIKASI
                             </Link>
                             {cert.eligible && (
                               <button
@@ -1032,17 +1079,7 @@ export default function DashboardPage() {
                                 {busy ? "MEMPERBARUI..." : "PERBARUI ANGKA"}
                               </button>
                             )}
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={claimCertificate}
-                            disabled={busy}
-                            className="inline-flex items-center space-x-2 rounded-lg border border-cyber-amber bg-cyber-amber px-5 py-2 font-mono text-xs font-bold text-cyber-void shadow-amber-glow hover:bg-cyber-amber-bright hover:shadow-amber-glow-lg disabled:opacity-50 transition-all"
-                          >
-                            <span>{busy ? "MENERBITKAN..." : "KLAIM & TERBITKAN SERTIFIKAT"}</span>
-                            <span>⭐</span>
-                          </button>
+                          </div>
                         )}
                       </div>
                     </div>

@@ -1,0 +1,37 @@
+{
+  "_catatan": "Posisi isian pada template.png (piksel, titik asal kiri atas). center_x/baseline_y = tengah teks pada garis dasar huruf. Ukuran font mengecil otomatis sampai min_size bila teks lebih lebar dari max_width. Nama yang tetap terlalu panjang dipecah jadi dua baris (wrap) dengan ukuran wrap_size..wrap_min_size, tidak pernah dipotong.",
+  "template": "template.png",
+  "dpi": 212.1,
+  "name": {
+    "center_x": 1240,
+    "baseline_y": 945,
+    "max_width": 1440,
+    "font": "fonts/GreatVibes-Regular.ttf",
+    "size": 190,
+    "min_size": 110,
+    "color": "#13223F",
+    "wrap": true,
+    "wrap_size": 96,
+    "wrap_min_size": 60
+  },
+  "date": {
+    "center_x": 620,
+    "baseline_y": 1420,
+    "max_width": 520,
+    "font": "fonts/Lora-Variable.ttf",
+    "weight": 600,
+    "size": 44,
+    "min_size": 30,
+    "color": "#13223F"
+  },
+  "footer": {
+    "center_x": 1240,
+    "baseline_y": 1612,
+    "max_width": 1500,
+    "font": "fonts/Lora-Variable.ttf",
+    "weight": 400,
+    "size": 27,
+    "min_size": 18,
+    "color": "#78766E"
+  }
+}
